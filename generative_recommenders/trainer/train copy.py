@@ -171,12 +171,6 @@ def train_fn(
             num_items=dataset.max_item_id,
             item_embedding_dim=item_embedding_dim,
         )
-    elif embedding_module_type == "withtext":
-        embedding_module: EmbeddingModule = LocalEmbeddingWithTextModule(
-            num_items=dataset.max_item_id,
-            item_embedding_dim=item_embedding_dim,
-            text_embedding_dim=text_embedding_dim,
-        )
     else:
         raise ValueError(f"Unknown embedding_module_type {embedding_module_type}")
     model_debug_str += f"-{embedding_module.debug_str()}"
@@ -314,14 +308,11 @@ def train_fn(
             eval_data_sampler.set_epoch(epoch)
         model.train()
         for row in iter(train_data_loader):
-            if embedding_module_type == "local":
-
-                seq_features, target_ids, target_ratings = movielens_seq_features_from_row(
-                    row,
-                    device=device,
-                    max_output_length=gr_output_length + 1,
-                )
-            elif embedding_module_type == "withtext":
+            seq_features, target_ids, target_ratings = movielens_seq_features_from_row(
+                row,
+                device=device,
+                max_output_length=gr_output_length + 1,
+            )
 
             if (batch_id % eval_interval) == 0:
                 model.eval()

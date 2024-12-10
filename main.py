@@ -37,7 +37,6 @@ from generative_recommenders.trainer.train import train_fn
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 
-
 def delete_flags(FLAGS, keys_to_delete: List[str]) -> None:  # pyre-ignore [2]
     keys = [key for key in FLAGS._flags()]
     for key in keys:

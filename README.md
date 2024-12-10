@@ -15,7 +15,7 @@ To reproduce the public experiments (traditional sequential recommender setting,
 Install PyTorch based on official instructions. Then,
 
 ```
-pip3 install gin-config absl-py scikit-learn scipy matplotlib numpy apex hypothesis pandas fbgemm_gpu iopath tensorboard
+pip3 install gin-config absl-py scikit-learn scipy matplotlib numpy apex hypothesis pandas fbgemm_gpu iopath tensorboard torch torchvision torchaudio numpy  
 ```
 
 #### Download and preprocess data.
