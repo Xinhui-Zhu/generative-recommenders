@@ -73,9 +73,9 @@ class DataProcessor:
     ) -> pd.DataFrame:
         if self._prefix == "ml-1m" and movie_data is not None:
             print("movie_data is not None")
-            id_embedding_map = movie_data.set_index("movie_id")["text_info_embedding"].to_dict()
+            token_embedding_map = movie_data.set_index("movie_id")["text_info_embedding"].to_dict()
             with open(f"tmp/{self._prefix}/token_embedding_map.pkl", "wb") as pickle_file:
-                pickle.dump(id_embedding_map, pickle_file)
+                pickle.dump(token_embedding_map, pickle_file)
             # tqdm.pandas(desc="Processing sequentialization")
             # ratings_data["sequence_item_texts"] = ratings_data["item_ids"].progress_apply(
             #     lambda items: [movie_text_map[item] for item in items]

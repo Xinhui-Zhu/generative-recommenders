@@ -69,6 +69,9 @@ class SampledSoftmaxLoss(AutoregressiveLoss):
             **kwargs,
         )
         positive_logits = positive_logits / self._softmax_temperature  # [0]
+        print("output_embeddings", output_embeddings.shape)
+        print("sampled_ids", sampled_ids.shape)
+        print("sampled_negative_embeddings", sampled_negative_embeddings.shape)
         sampled_negatives_logits, _ = self._model.similarity_fn(
             query_embeddings=output_embeddings,  # [N', D]
             item_ids=sampled_ids,  # [N', R]

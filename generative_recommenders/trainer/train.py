@@ -125,8 +125,8 @@ def train_fn(
     full_eval_every_n: int = 1,
     save_ckpt_every_n: int = 1000,
     partial_eval_num_iters: int = 32,
-    embedding_module_type: str = "local",
-    # embedding_module_type: str = "withtext",
+    # embedding_module_type: str = "local",
+    embedding_module_type: str = "withtext",
     item_embedding_dim: int = 240,
     text_embedding_dim: int = 768,
     interaction_module_type: str = "",
@@ -178,7 +178,7 @@ def train_fn(
         embedding_module: EmbeddingModule = LocalEmbeddingWithTextModule(
             num_items=dataset.max_item_id,
             item_embedding_dim=item_embedding_dim,
-            text_embedding_dim=text_embedding_dim,
+            token_embedding_map_path=f"tmp/{dataset_name}/token_embedding_map.pkl",
         )
     else:
         raise ValueError(f"Unknown embedding_module_type {embedding_module_type}")
@@ -195,18 +195,18 @@ def train_fn(
     ), f"Not implemented for {user_embedding_norm}"
     output_postproc_module = (
         L2NormEmbeddingPostprocessor(
-            embedding_dim=item_embedding_dim,
+            embedding_dim=item_embedding_dim+text_embedding_dim,
             eps=1e-6,
         )
         if user_embedding_norm == "l2_norm"
         else LayerNormEmbeddingPostprocessor(
-            embedding_dim=item_embedding_dim,
+            embedding_dim=item_embedding_dim+text_embedding_dim,
             eps=1e-6,
         )
     )
     input_preproc_module = LearnablePositionalEmbeddingInputFeaturesPreprocessor(
         max_sequence_len=dataset.max_sequence_length + gr_output_length + 1,
-        embedding_dim=item_embedding_dim,
+        embedding_dim=item_embedding_dim+text_embedding_dim,
         dropout_rate=dropout_rate,
     )
 
@@ -317,7 +317,7 @@ def train_fn(
             eval_data_sampler.set_epoch(epoch)
         model.train()
         for row in iter(train_data_loader):
-            seq_features, target_ids, target_ratings, historical_texts = movielens_seq_features_from_row(
+            seq_features, target_ids, target_ratings = movielens_seq_features_from_row(
                 row,
                 device=device,
                 max_output_length=gr_output_length + 1,
@@ -369,12 +369,9 @@ def train_fn(
             )
 
             opt.zero_grad()
-            if embedding_module_type == "local":
-                input_embeddings = model.module.get_item_embeddings(seq_features.past_ids)
-            elif embedding_module_type == "withtext":
-                input_embeddings = model.module.get_item_embeddings(seq_features.past_ids, historical_texts)
+            input_embeddings = model.module.get_item_embeddings(seq_features.past_ids)
 
-            print("item_embeddings.shape =", input_embeddings.shape)
+            # print("item_embeddings.shape =", input_embeddings.shape)
             seq_embeddings = model(
                 past_lengths=seq_features.past_lengths,
                 past_ids=seq_features.past_ids,
@@ -398,6 +395,8 @@ def train_fn(
                 negatives_sampler._item_emb = model.module._embedding_module._item_emb
 
             ar_mask = supervision_ids[:, 1:] != 0
+            # print("seq_embeddings", seq_embeddings.shape)
+            # print("input_embeddings", input_embeddings.shape)
             loss, aux_losses = ar_loss(
                 lengths=seq_features.past_lengths,  # [B],
                 output_embeddings=seq_embeddings[:, :-1, :],  # [B, N-1, D]

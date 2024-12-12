@@ -40,11 +40,9 @@ def movielens_seq_features_from_row(
     historical_ids = row["historical_ids"].to(device)  # [B, N]
     historical_ratings = row["historical_ratings"].to(device)
     historical_timestamps = row["historical_timestamps"].to(device)
-    historical_texts = row["historical_texts"]
     target_ids = row["target_ids"].to(device).unsqueeze(1)  # [B, 1]
     target_ratings = row["target_ratings"].to(device).unsqueeze(1)
     target_timestamps = row["target_timestamps"].to(device).unsqueeze(1)
-    target_texts = row["target_texts"]
     if max_output_length > 0:
         B = historical_lengths.size(0)
         historical_ids = torch.cat(
@@ -93,4 +91,4 @@ def movielens_seq_features_from_row(
             "ratings": historical_ratings,
         },
     )
-    return features, target_ids, target_ratings, historical_texts
+    return features, target_ids, target_ratings
