@@ -45,6 +45,7 @@ from generative_recommenders.modeling.sequential.autoregressive_losses import (
 from generative_recommenders.modeling.sequential.embedding_modules import (
     EmbeddingModule,
     LocalEmbeddingModule,
+    LocalEmbeddingWithTextModule,
 )
 from generative_recommenders.modeling.sequential.encoder_utils import (
     get_sequential_encoder,
@@ -125,7 +126,9 @@ def train_fn(
     save_ckpt_every_n: int = 1000,
     partial_eval_num_iters: int = 32,
     embedding_module_type: str = "local",
+    # embedding_module_type: str = "withtext",
     item_embedding_dim: int = 240,
+    text_embedding_dim: int = 768,
     interaction_module_type: str = "",
     gr_output_length: int = 10,
     l2_norm_eps: float = 1e-6,
@@ -183,8 +186,8 @@ def train_fn(
 
     interaction_module, interaction_module_debug_str = get_similarity_function(
         module_type=interaction_module_type,
-        query_embedding_dim=item_embedding_dim,
-        item_embedding_dim=item_embedding_dim,
+        query_embedding_dim=item_embedding_dim+text_embedding_dim,
+        item_embedding_dim=item_embedding_dim+text_embedding_dim,
     )
 
     assert (
@@ -314,15 +317,12 @@ def train_fn(
             eval_data_sampler.set_epoch(epoch)
         model.train()
         for row in iter(train_data_loader):
-            if embedding_module_type == "local":
-
-                seq_features, target_ids, target_ratings = movielens_seq_features_from_row(
-                    row,
-                    device=device,
-                    max_output_length=gr_output_length + 1,
-                )
-            elif embedding_module_type == "withtext":
-
+            seq_features, target_ids, target_ratings, historical_texts = movielens_seq_features_from_row(
+                row,
+                device=device,
+                max_output_length=gr_output_length + 1,
+            )
+                
             if (batch_id % eval_interval) == 0:
                 model.eval()
 
@@ -369,7 +369,12 @@ def train_fn(
             )
 
             opt.zero_grad()
-            input_embeddings = model.module.get_item_embeddings(seq_features.past_ids)
+            if embedding_module_type == "local":
+                input_embeddings = model.module.get_item_embeddings(seq_features.past_ids)
+            elif embedding_module_type == "withtext":
+                input_embeddings = model.module.get_item_embeddings(seq_features.past_ids, historical_texts)
+
+            print("item_embeddings.shape =", input_embeddings.shape)
             seq_embeddings = model(
                 past_lengths=seq_features.past_lengths,
                 past_ids=seq_features.past_ids,

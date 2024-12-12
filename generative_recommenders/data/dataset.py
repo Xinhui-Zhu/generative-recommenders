@@ -121,6 +121,13 @@ class DatasetV2(torch.utils.data.Dataset):
             0,
             sampling_kept_mask=sampling_kept_mask,
         )
+        movie_history_texts, texts_len = eval_int_list(
+            data.sequence_item_texts,
+            self._padding_length,
+            self._ignore_last_n,
+            0,
+            sampling_kept_mask=sampling_kept_mask,
+        )
         assert (
             movie_history_len == timestamps_len
         ), f"history len {movie_history_len} differs from timestamp len {timestamps_len}."
@@ -145,13 +152,16 @@ class DatasetV2(torch.utils.data.Dataset):
         historical_ids = movie_history[1:]
         historical_ratings = movie_history_ratings[1:]
         historical_timestamps = movie_timestamps[1:]
+        historical_texts = movie_history_texts[1:]
         target_ids = movie_history[0]
         target_ratings = movie_history_ratings[0]
         target_timestamps = movie_timestamps[0]
+        target_texts = movie_history_texts[0]
         if self._chronological:
             historical_ids.reverse()
             historical_ratings.reverse()
             historical_timestamps.reverse()
+            historical_texts.reverse()
 
         max_seq_len = self._padding_length - 1
         history_length = min(len(historical_ids), max_seq_len)
@@ -170,6 +180,11 @@ class DatasetV2(torch.utils.data.Dataset):
             max_seq_len,
             self._chronological,
         )
+        historical_texts = _truncate_or_pad_seq(
+            historical_texts,
+            max_seq_len,
+            self._chronological,
+        )
         # moved to features.py
         # if self._chronological:
         #     historical_ids.append(0)
@@ -183,10 +198,12 @@ class DatasetV2(torch.utils.data.Dataset):
             "historical_timestamps": torch.tensor(
                 historical_timestamps, dtype=torch.int64
             ),
+            "historical_texts": historical_texts,
             "history_lengths": history_length,
             "target_ids": target_ids,
             "target_ratings": target_ratings,
             "target_timestamps": target_timestamps,
+            "target_texts": target_texts,
         }
         return ret
 

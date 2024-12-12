@@ -20,14 +20,16 @@ import os
 import sys
 import tarfile
 from typing import Dict, Optional, Union
-
+from tqdm import tqdm
 from urllib.request import urlretrieve
 from zipfile import ZipFile
-
 import numpy as np
-
 import pandas as pd
+from transformers import BertTokenizer, BertModel
+import torch
+import pickle
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 
@@ -67,13 +69,25 @@ class DataProcessor:
         self,
         ratings_data: pd.DataFrame,
         user_data: Optional[pd.DataFrame] = None,
+        movie_data: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
+        if self._prefix == "ml-1m" and movie_data is not None:
+            print("movie_data is not None")
+            id_embedding_map = movie_data.set_index("movie_id")["text_info_embedding"].to_dict()
+            with open(f"tmp/{self._prefix}/token_embedding_map.pkl", "wb") as pickle_file:
+                pickle.dump(id_embedding_map, pickle_file)
+            # tqdm.pandas(desc="Processing sequentialization")
+            # ratings_data["sequence_item_texts"] = ratings_data["item_ids"].progress_apply(
+            #     lambda items: [movie_text_map[item] for item in items]
+            # )
+
         if user_data is not None:
             ratings_data_transformed = ratings_data.join(
                 user_data.set_index("user_id"), on="user_id"
             )
         else:
             ratings_data_transformed = ratings_data
+        
         ratings_data_transformed.item_ids = ratings_data_transformed.item_ids.apply(
             lambda x: ",".join([str(v) for v in x])
         )
@@ -91,6 +105,7 @@ class DataProcessor:
             },
             inplace=True,
         )
+        print(ratings_data_transformed.columns)
         return ratings_data_transformed
 
     def file_exists(self, name: str) -> bool:
@@ -216,6 +231,49 @@ class MovielensDataProcessor(DataProcessor):
             movies["cleaned_title"] = movies["title"].apply(lambda x: x[:-7])
             # movies.year = pd.Categorical(movies.year)
             # movies["year"] = movies.year.cat.codes
+            movies["text_info"] = movies.apply(
+                lambda row: f"{row['title']}, {row['genres']}",
+                axis=1
+            )
+            # 初始化 BERT 模型和 Tokenizer
+            tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+            model = BertModel.from_pretrained('bert-base-uncased')
+            model = model.to(device)
+
+            def get_bert_embeddings_batch(texts):
+                """
+                将句子列表转换为 BERT 嵌入
+                :param texts: List[str], 输入句子列表
+                :return: List[torch.Tensor], 每个句子的 (768,) 嵌入
+                """
+                inputs = tokenizer(
+                    texts,
+                    return_tensors="pt",
+                    truncation=True,
+                    padding="max_length",
+                    max_length=128
+                )
+                inputs = {key: value.to(device) for key, value in inputs.items()}
+
+                with torch.no_grad():
+                    outputs = model(**inputs)
+
+                # 提取每个句子的 [CLS] 嵌入
+                embeddings = outputs.last_hidden_state[:, 0, :].cpu().tolist()  # 移动回 CPU
+                return embeddings
+
+            def bert_tokenize_to_ids(text):
+                return tokenizer.encode(text, add_special_tokens=True)
+
+            batch_size = 32
+            all_embeddings = []
+
+            for i in tqdm(range(0, len(movies), batch_size)):
+                batch_texts = movies["text_info"].iloc[i:i+batch_size].tolist()
+                batch_embeddings = get_bert_embeddings_batch(batch_texts)
+                all_embeddings.extend(batch_embeddings)
+
+            movies["text_info_embedding"] = all_embeddings
 
         if users is not None:
             ## Users (ml-1m only)
@@ -282,7 +340,7 @@ class MovielensDataProcessor(DataProcessor):
         print(self._prefix)
         print(result)
 
-        seq_ratings_data = self.to_seq_data(seq_ratings_data, users)
+        seq_ratings_data = self.to_seq_data(seq_ratings_data, users, movies)
         seq_ratings_data.sample(frac=1).reset_index().to_csv(
             self.output_format_csv(), index=False, sep=","
         )
