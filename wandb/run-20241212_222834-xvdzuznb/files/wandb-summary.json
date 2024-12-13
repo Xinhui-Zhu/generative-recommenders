@@ -1,1 +1,0 @@
-{"batch_id":0,"_runtime":63.332796776,"eval_ndcg@10":0.015625,"eval_hr@50":0.0625,"epoch":0,"_timestamp":1.7340605780087616e+09,"eval_hr@10":0.03125,"_wandb":{"runtime":66},"eval_mrr":0.014738764613866806,"_step":0}
