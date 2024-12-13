@@ -45,7 +45,6 @@ from generative_recommenders.modeling.sequential.autoregressive_losses import (
 from generative_recommenders.modeling.sequential.embedding_modules import (
     EmbeddingModule,
     LocalEmbeddingModule,
-    LocalEmbeddingWithTextModule,
 )
 from generative_recommenders.modeling.sequential.encoder_utils import (
     get_sequential_encoder,
@@ -67,6 +66,7 @@ from generative_recommenders.modeling.similarity_utils import get_similarity_fun
 from generative_recommenders.trainer.data_loader import create_data_loader
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
+import wandb
 
 
 def setup(rank: int, world_size: int, master_port: int) -> None:
@@ -103,6 +103,7 @@ def train_fn(
     max_sequence_length: int = 200,
     positional_sampling_ratio: float = 1.0,
     local_batch_size: int = 128,
+    gradient_accumulation_steps: int = 1,
     eval_batch_size: int = 128,
     eval_user_max_batch_size: Optional[int] = None,
     main_module: str = "SASRec",
@@ -127,14 +128,27 @@ def train_fn(
     partial_eval_num_iters: int = 32,
     # embedding_module_type: str = "local",
     embedding_module_type: str = "withtext",
+    text_requires_grad: bool = False,
     item_embedding_dim: int = 240,
-    text_embedding_dim: int = 768,
     interaction_module_type: str = "",
     gr_output_length: int = 10,
     l2_norm_eps: float = 1e-6,
     enable_tf32: bool = False,
     random_seed: int = 42,
 ) -> None:
+
+
+    # Initialize WandB
+    if rank == 0:
+        wandb.init(project='generative-recommenders', config={
+            "learning_rate": learning_rate,
+            "batch_size": local_batch_size,
+            "num_epochs": num_epochs,
+            "max_sequence_length": max_sequence_length,
+            "dataset_name": dataset_name,
+            "embedding_module_type": embedding_module_type,
+        })
+
     # to enable more deterministic results.
     random.seed(random_seed)
     torch.backends.cuda.matmul.allow_tf32 = enable_tf32
@@ -143,7 +157,6 @@ def train_fn(
     logging.info(f"cudnn.allow_tf32: {enable_tf32}")
     logging.info(f"Training model on rank {rank}.")
     setup(rank, world_size, master_port)
-
     dataset = get_reco_dataset(
         dataset_name=dataset_name,
         max_sequence_length=max_sequence_length,
@@ -175,19 +188,21 @@ def train_fn(
             item_embedding_dim=item_embedding_dim,
         )
     elif embedding_module_type == "withtext":
-        embedding_module: EmbeddingModule = LocalEmbeddingWithTextModule(
+        embedding_module: EmbeddingModule = LocalEmbeddingModule(
             num_items=dataset.max_item_id,
             item_embedding_dim=item_embedding_dim,
-            token_embedding_map_path=f"tmp/{dataset_name}/token_embedding_map.pkl",
+            token_embedding_map_path = f"tmp/{dataset_name}/token_embedding_map.pkl",
+            text_requires_grad = text_requires_grad,
         )
+        item_embedding_dim=embedding_module.item_embedding_dim
     else:
         raise ValueError(f"Unknown embedding_module_type {embedding_module_type}")
     model_debug_str += f"-{embedding_module.debug_str()}"
 
     interaction_module, interaction_module_debug_str = get_similarity_function(
         module_type=interaction_module_type,
-        query_embedding_dim=item_embedding_dim+text_embedding_dim,
-        item_embedding_dim=item_embedding_dim+text_embedding_dim,
+        query_embedding_dim=item_embedding_dim,
+        item_embedding_dim=item_embedding_dim,
     )
 
     assert (
@@ -195,18 +210,18 @@ def train_fn(
     ), f"Not implemented for {user_embedding_norm}"
     output_postproc_module = (
         L2NormEmbeddingPostprocessor(
-            embedding_dim=item_embedding_dim+text_embedding_dim,
+            embedding_dim=item_embedding_dim,
             eps=1e-6,
         )
         if user_embedding_norm == "l2_norm"
         else LayerNormEmbeddingPostprocessor(
-            embedding_dim=item_embedding_dim+text_embedding_dim,
+            embedding_dim=item_embedding_dim,
             eps=1e-6,
         )
     )
     input_preproc_module = LearnablePositionalEmbeddingInputFeaturesPreprocessor(
         max_sequence_len=dataset.max_sequence_length + gr_output_length + 1,
-        embedding_dim=item_embedding_dim+text_embedding_dim,
+        embedding_dim=item_embedding_dim,
         dropout_rate=dropout_rate,
     )
 
@@ -322,7 +337,7 @@ def train_fn(
                 device=device,
                 max_output_length=gr_output_length + 1,
             )
-                
+
             if (batch_id % eval_interval) == 0:
                 model.eval()
 
@@ -358,6 +373,16 @@ def train_fn(
                     f"HR@50 {_avg(eval_dict['hr@50'], world_size):.4f}, "
                     + f"MRR {_avg(eval_dict['mrr'], world_size):.4f} "
                 )
+                if rank == 0:
+                    wandb.log({
+                        "eval_ndcg@10": _avg(eval_dict['ndcg@10'], world_size),
+                        "eval_hr@10": _avg(eval_dict['hr@10'], world_size),
+                        "eval_hr@50": _avg(eval_dict['hr@50'], world_size),
+                        "eval_mrr": _avg(eval_dict['mrr'], world_size),
+                        "epoch": epoch,
+                        "batch_id": batch_id,
+                    })
+
                 model.train()
 
             # TODO: consider separating this out?
@@ -368,10 +393,8 @@ def train_fn(
                 src=target_ids.view(-1, 1),
             )
 
-            opt.zero_grad()
+            # opt.zero_grad()
             input_embeddings = model.module.get_item_embeddings(seq_features.past_ids)
-
-            # print("item_embeddings.shape =", input_embeddings.shape)
             seq_embeddings = model(
                 past_lengths=seq_features.past_lengths,
                 past_ids=seq_features.past_ids,
@@ -395,8 +418,6 @@ def train_fn(
                 negatives_sampler._item_emb = model.module._embedding_module._item_emb
 
             ar_mask = supervision_ids[:, 1:] != 0
-            # print("seq_embeddings", seq_embeddings.shape)
-            # print("input_embeddings", input_embeddings.shape)
             loss, aux_losses = ar_loss(
                 lengths=seq_features.past_lengths,  # [B],
                 output_embeddings=seq_embeddings[:, :-1, :],  # [B, N-1, D]
@@ -415,29 +436,42 @@ def train_fn(
                 writer.add_scalar("losses/ar_loss", loss, batch_id)
                 writer.add_scalar("losses/main_loss", main_loss, batch_id)
 
+            # loss = loss / gradient_accumulation_steps
             loss.backward()
 
-            # Optional linear warmup.
-            if batch_id < num_warmup_steps:
-                lr_scalar = min(1.0, float(batch_id + 1) / num_warmup_steps)
-                for pg in opt.param_groups:
-                    pg["lr"] = lr_scalar * learning_rate
-                lr = lr_scalar * learning_rate
-            else:
-                lr = learning_rate
+            # 根据累积步数更新模型
+            if (batch_id + 1) % gradient_accumulation_steps == 0:
+                opt.step()    # 更新参数
+                opt.zero_grad()  # 清除梯度
 
-            if (batch_id % eval_interval) == 0:
-                logging.info(
-                    f" rank: {rank}, batch-stat (train): step {batch_id} "
-                    f"(epoch {epoch} in {time.time() - last_training_time:.2f}s): {loss:.6f}"
-                )
-                last_training_time = time.time()
+                # 在这里记录累积步后的训练损失等信息
                 if rank == 0:
-                    assert writer is not None
-                    writer.add_scalar("loss/train", loss, batch_id)
-                    writer.add_scalar("lr", lr, batch_id)
+                    wandb.log({
+                        "train_loss": loss.item(),
+                        "epoch": epoch,
+                        "batch_id": batch_id
+                    })
 
-            opt.step()
+                # Optional linear warmup.
+                if batch_id < num_warmup_steps:
+                    lr_scalar = min(1.0, float(batch_id + 1) / num_warmup_steps)
+                    for pg in opt.param_groups:
+                        pg["lr"] = lr_scalar * learning_rate
+                    lr = lr_scalar * learning_rate
+                else:
+                    lr = learning_rate
+
+                if (batch_id % eval_interval) == 0:
+                    logging.info(
+                        f" rank: {rank}, batch-stat (train): step {batch_id} "
+                        f"(epoch {epoch} in {time.time() - last_training_time:.2f}s): {loss:.6f}"
+                    )
+                    last_training_time = time.time()
+                    if rank == 0:
+                        assert writer is not None
+                        writer.add_scalar("loss/train", loss, batch_id)
+                        writer.add_scalar("lr", lr, batch_id)
+                        # wandb.log({"train_loss": loss.item(), "epoch": epoch, "batch_id": batch_id, "lr": lr})
 
             batch_id += 1
 
@@ -529,6 +563,12 @@ def train_fn(
             f"rank {rank}: eval @ epoch {epoch} in {time.time() - eval_start_time:.2f}s: "
             f"NDCG@10 {ndcg_10:.4f}, NDCG@50 {ndcg_50:.4f}, HR@10 {hr_10:.4f}, HR@50 {hr_50:.4f}, MRR {mrr:.4f}"
         )
+        if rank == 0:
+            wandb.log({
+                "eval_ndcg@10": ndcg_10,
+                "eval_hr@10": hr_10,
+                "epoch": epoch
+            })
         last_training_time = time.time()
 
     if rank == 0:
@@ -544,5 +584,5 @@ def train_fn(
             },
             f"./ckpts/{model_desc}_ep{epoch}",
         )
-
+        wandb.finish()
     cleanup()

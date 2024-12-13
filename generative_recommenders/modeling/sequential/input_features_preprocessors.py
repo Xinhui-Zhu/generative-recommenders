@@ -80,11 +80,7 @@ class LearnablePositionalEmbeddingInputFeaturesPreprocessor(
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         B, N = past_ids.size()
         D = past_embeddings.size(-1)
-        # print(past_embeddings.shape)
-        # print(self._pos_emb(
-        #     torch.arange(N, device=past_ids.device).unsqueeze(0).repeat(B, 1)
-        # ).shape)
-
+        
         user_embeddings = past_embeddings * (self._embedding_dim**0.5) + self._pos_emb(
             torch.arange(N, device=past_ids.device).unsqueeze(0).repeat(B, 1)
         )

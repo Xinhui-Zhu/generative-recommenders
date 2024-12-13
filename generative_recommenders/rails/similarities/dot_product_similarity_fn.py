@@ -60,8 +60,7 @@ class DotProductSimilarity(SimilarityModule):
                 {},
             )
         else:
-            print("item_embeddings", item_embeddings.shape)
-            print("query_embeddings", query_embeddings.shape)
+            
             # [B, X, D] x ([B, D] -> [B, D, 1]) => [B, X, 1] -> [B, X]
             return (
                 torch.bmm(item_embeddings, query_embeddings.unsqueeze(2)).squeeze(2),

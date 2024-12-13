@@ -36,6 +36,7 @@ class EmbeddingModule(torch.nn.Module):
     def item_embedding_dim(self) -> int:
         pass
 
+import pickle
 
 class LocalEmbeddingModule(EmbeddingModule):
 
@@ -43,149 +44,96 @@ class LocalEmbeddingModule(EmbeddingModule):
         self,
         num_items: int,
         item_embedding_dim: int,
-    ) -> None:
-        super().__init__()
-
-        self._item_embedding_dim: int = item_embedding_dim
-        self._item_emb = torch.nn.Embedding(
-            num_items + 1, item_embedding_dim, padding_idx=0
-        )
-        self.reset_params()
-
-    def debug_str(self) -> str:
-        return f"local_emb_d{self._item_embedding_dim}"
-
-    def reset_params(self) -> None:
-        for name, params in self.named_parameters():
-            if "_item_emb" in name:
-                print(
-                    f"Initialize {name} as truncated normal: {params.data.size()} params"
-                )
-                truncated_normal(params, mean=0.0, std=0.02)
-            else:
-                print(f"Skipping initializing params {name} - not configured")
-
-    def get_item_embeddings(self, item_ids: torch.Tensor) -> torch.Tensor:
-        return self._item_emb(item_ids)
-
-    @property
-    def item_embedding_dim(self) -> int:
-        return self._item_embedding_dim
-
-
-class CategoricalEmbeddingModule(EmbeddingModule):
-
-    def __init__(
-        self,
-        num_items: int,
-        item_embedding_dim: int,
-        item_id_to_category_id: torch.Tensor,
-    ) -> None:
-        super().__init__()
-
-        self._item_embedding_dim: int = item_embedding_dim
-        self._item_emb: torch.nn.Embedding = torch.nn.Embedding(
-            num_items + 1, item_embedding_dim, padding_idx=0
-        )
-        self.register_buffer("_item_id_to_category_id", item_id_to_category_id)
-        self.reset_params()
-
-    def debug_str(self) -> str:
-        return f"cat_emb_d{self._item_embedding_dim}"
-
-    def reset_params(self) -> None:
-        for name, params in self.named_parameters():
-            if "_item_emb" in name:
-                print(
-                    f"Initialize {name} as truncated normal: {params.data.size()} params"
-                )
-                truncated_normal(params, mean=0.0, std=0.02)
-            else:
-                print(f"Skipping initializing params {name} - not configured")
-
-    def get_item_embeddings(self, item_ids: torch.Tensor) -> torch.Tensor:
-        item_ids = self._item_id_to_category_id[(item_ids - 1).clamp(min=0)] + 1
-        return self._item_emb(item_ids)
-
-    @property
-    def item_embedding_dim(self) -> int:
-        return self._item_embedding_dim
-
-import pickle
-
-class LocalEmbeddingWithTextModule(EmbeddingModule):
-
-    def __init__(
-        self,
-        num_items: int,
-        item_embedding_dim: int,
-        token_embedding_map_path: str,
+        token_embedding_map_path: str = None,
+        text_requires_grad: bool = False
     ) -> None:
         """
-        初始化 LocalEmbeddingWithTextModule
+        初始化 LocalEmbeddingModule
         :param num_items: 项目总数
         :param item_embedding_dim: ID 嵌入的维度
-        :param token_embedding_map_path: 保存的 token_embedding_map 的文件路径
+        :param token_embedding_map_path: 保存的 token_embedding_map 的文件路径（如果为 None，则不加载文本嵌入）
         """
         super().__init__()
         self._item_embedding_dim: int = item_embedding_dim
+        self._text_embedding_dim: int = 0  # 默认为 0
+        self.token_embedding_map_path = token_embedding_map_path
 
-        # 初始化项目 ID 嵌入
-        self._item_emb = torch.nn.Embedding(
-            num_items + 1, item_embedding_dim, padding_idx=0
-        )
-        self.reset_params()
+        # 检查是否需要加载文本嵌入
+        if token_embedding_map_path is not None:
+            # 加载预生成的文本嵌入
+            with open(token_embedding_map_path, "rb") as f:
+                token_embedding_map = pickle.load(f)
 
-        # 加载预生成的文本嵌入
-        with open(token_embedding_map_path, "rb") as f:
-            token_embedding_map = pickle.load(f)
+            # 将 token_embedding_map 转换为张量
+            self._text_embedding_dim = len(next(iter(token_embedding_map.values())))
+            token_embedding_tensor = torch.zeros(
+                (num_items + 1, self._text_embedding_dim)
+            )
+            for token_id, embedding in token_embedding_map.items():
+                token_embedding_tensor[token_id] = torch.tensor(embedding)
 
-        # 将 token_embedding_map 转换为张量
-        token_embedding_tensor = torch.zeros(
-            (num_items + 1, len(next(iter(token_embedding_map.values()))))
-        )
-        for token_id, embedding in token_embedding_map.items():
-            token_embedding_tensor[token_id] = torch.tensor(embedding)
+            # 创建一个包含 ID 嵌入和文本嵌入的完整嵌入层
+            total_embedding_dim = item_embedding_dim + self._text_embedding_dim
+            self._item_emb = torch.nn.Embedding(
+                num_items + 1, total_embedding_dim, padding_idx=0
+            )
 
-        # 创建一个固定的嵌入层用于文本嵌入
-        self.text_embedding = torch.nn.Embedding.from_pretrained(
-            token_embedding_tensor, freeze=True, padding_idx=0
-        )
+            # 初始化随机部分并加载文本嵌入
+            self.reset_params()
+            with torch.no_grad():
+                self._item_emb.weight[:, item_embedding_dim:] = token_embedding_tensor
+                if not text_requires_grad:
+                    self._item_emb.weight[:, item_embedding_dim:].requires_grad = False
+        
+        else:
+            # 仅创建随机初始化的 ID 嵌入层
+            self._item_emb = torch.nn.Embedding(
+                num_items + 1, item_embedding_dim, padding_idx=0
+            )
+            self.reset_params()
 
     def debug_str(self) -> str:
-        return f"local_emb_d{self._item_embedding_dim}_text_preloaded"
+        """
+        返回调试信息
+        """
+        if self.token_embedding_map_path:
+            return f"local_emb_d{self._item_embedding_dim}_text_preloaded"
+        else:
+            return f"local_emb_d{self._item_embedding_dim}"
 
     def reset_params(self) -> None:
+        """
+        重置参数
+        """
         for name, params in self.named_parameters():
             if "_item_emb" in name:
-                print(
-                    f"Initialize {name} as truncated normal: {params.data.size()} params"
-                )
-                truncated_normal(params, mean=0.0, std=0.02)
+                # 仅初始化随机部分
+                if self.token_embedding_map_path:
+                    params.data[:, :self._item_embedding_dim] = truncated_normal(
+                        params.data[:, :self._item_embedding_dim], mean=0.0, std=0.02
+                    )
+                    print(
+                        f"Initialize {name} (random part) as truncated normal: {params.data[:, :self._item_embedding_dim].size()}"
+                    )
+                else:
+                    truncated_normal(params, mean=0.0, std=0.02)
+                    print(
+                        f"Initialize {name} as truncated normal: {params.data.size()} params"
+                    )
             else:
                 print(f"Skipping initializing params {name} - not configured")
 
-    def get_item_embeddings(
-        self, item_ids: torch.Tensor
-    ) -> torch.Tensor:
+    def get_item_embeddings(self, item_ids: torch.Tensor) -> torch.Tensor:
         """
-        获取 item 的嵌入向量（ID 嵌入 + 文本嵌入）
+        获取项目嵌入
         :param item_ids: 项目 ID 的张量
-        :return: 拼接后的嵌入向量
+        :return: 项目嵌入
         """
-        # ID 嵌入
-        item_emb = self._item_emb(item_ids)
-
-        # 文本嵌入
-        text_emb = self.text_embedding(item_ids)
-
-        # 拼接 ID 嵌入和文本嵌入
-        combined_emb = torch.cat([item_emb, text_emb], dim=-1)  # [batch_size, embedding_dim * 2]
-        return combined_emb
+        return self._item_emb(item_ids)
 
     @property
     def item_embedding_dim(self) -> int:
         """
-        返回拼接后的总嵌入维度
+        返回总嵌入维度
         """
-        return self._item_embedding_dim + self.text_embedding.embedding_dim
+        return self._item_embedding_dim + self._text_embedding_dim
