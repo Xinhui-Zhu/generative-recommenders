@@ -140,7 +140,9 @@ def train_fn(
 
     # Initialize WandB
     if rank == 0:
-        wandb.init(project='generative-recommenders', config={
+        wandb.init(project='generative-recommenders', 
+            name=f"{embedding_module_type}-bs{local_batch_size*gradient_accumulation_steps}-emb{item_embedding_dim}",
+            config={
             "learning_rate": learning_rate,
             "batch_size": local_batch_size,
             "num_epochs": num_epochs,
@@ -375,10 +377,10 @@ def train_fn(
                 )
                 if rank == 0:
                     wandb.log({
-                        "eval_ndcg@10": _avg(eval_dict['ndcg@10'], world_size),
-                        "eval_hr@10": _avg(eval_dict['hr@10'], world_size),
-                        "eval_hr@50": _avg(eval_dict['hr@50'], world_size),
-                        "eval_mrr": _avg(eval_dict['mrr'], world_size),
+                        "train/ndcg@10": _avg(eval_dict['ndcg@10'], world_size),
+                        "train/hr@10": _avg(eval_dict['hr@10'], world_size),
+                        "train/hr@50": _avg(eval_dict['hr@50'], world_size),
+                        "train/mrr": _avg(eval_dict['mrr'], world_size),
                         "epoch": epoch,
                         "batch_id": batch_id,
                     })
@@ -436,21 +438,16 @@ def train_fn(
                 writer.add_scalar("losses/ar_loss", loss, batch_id)
                 writer.add_scalar("losses/main_loss", main_loss, batch_id)
 
-            # loss = loss / gradient_accumulation_steps
             loss.backward()
+            if rank == 0:
+                wandb.log({
+                    "train/loss": loss.item(),
+                    "epoch": epoch,
+                    "batch_id": batch_id
+                })
 
             # 根据累积步数更新模型
             if (batch_id + 1) % gradient_accumulation_steps == 0:
-                opt.step()    # 更新参数
-                opt.zero_grad()  # 清除梯度
-
-                # 在这里记录累积步后的训练损失等信息
-                if rank == 0:
-                    wandb.log({
-                        "train_loss": loss.item(),
-                        "epoch": epoch,
-                        "batch_id": batch_id
-                    })
 
                 # Optional linear warmup.
                 if batch_id < num_warmup_steps:
@@ -471,7 +468,8 @@ def train_fn(
                         assert writer is not None
                         writer.add_scalar("loss/train", loss, batch_id)
                         writer.add_scalar("lr", lr, batch_id)
-                        # wandb.log({"train_loss": loss.item(), "epoch": epoch, "batch_id": batch_id, "lr": lr})
+                opt.step()    # 更新参数
+                opt.zero_grad()  # 清除梯度
 
             batch_id += 1
 
@@ -565,9 +563,13 @@ def train_fn(
         )
         if rank == 0:
             wandb.log({
-                "eval_ndcg@10": ndcg_10,
-                "eval_hr@10": hr_10,
-                "epoch": epoch
+                "eval/ndcg@50": ndcg_50,
+                "eval/ndcg@10": ndcg_10,
+                "eval/hr@50": hr_50,
+                "eval/hr@10": hr_10,
+                "eval/mrr": mrr,
+                "epoch": epoch,
+                "batch_id": batch_id
             })
         last_training_time = time.time()
 
