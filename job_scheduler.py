@@ -3,7 +3,8 @@ import os
 
 # Define the commands to run
 commands = [
-
+    "CUDA_VISIBLE_DEVICES=0,2,3 /proj/arise/arise/xz3276/data/genrec/bin/python3 /proj/arise/arise/xz3276/DeepSeek-Coder/Evaluation/generative-recommenders/main.py --gin_config_file=/proj/arise/arise/xz3276/DeepSeek-Coder/Evaluation/generative-recommenders/configs/ml-1m/hstu-sampled-softmax-n128-large-final-text.gin --master_port=12345",
+    "CUDA_VISIBLE_DEVICES=0,2,3 /proj/arise/arise/xz3276/data/genrec/bin/python3 /proj/arise/arise/xz3276/DeepSeek-Coder/Evaluation/generative-recommenders/main.py --gin_config_file=/proj/arise/arise/xz3276/DeepSeek-Coder/Evaluation/generative-recommenders/configs/ml-1m/hstu-sampled-softmax-n128-large-final.gin --master_port=12345",
 ]
 
 # Log file path
@@ -36,7 +37,7 @@ with open(log_file, "w") as log:
             
             # Log the exit code
             log.write(f"Exit code: {result.returncode}\n")
-            
+
         except Exception as e:
             # Log any exceptions raised during execution
             log.write(f"Exception occurred while running command {i}: {e}\n")

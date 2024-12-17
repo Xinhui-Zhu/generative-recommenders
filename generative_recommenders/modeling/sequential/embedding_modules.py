@@ -77,6 +77,18 @@ class LocalEmbeddingModule(EmbeddingModule):
             self._item_emb = torch.nn.Embedding(
                 num_items + 1, total_embedding_dim, padding_idx=0
             )
+            print("token_embedding_tensor.shape =", token_embedding_tensor.shape)
+            # zero_rows 是一个布尔张量，表示每一行是否全为0
+            zero_rows = (token_embedding_tensor == 0).all(dim=1)
+
+            # 如果要检查是否存在任何全0的行:
+            any_zero_rows = zero_rows.any().item()
+            print("存在全0行吗？", any_zero_rows)
+
+            # 如果需要找出具体哪些行是全0行：
+            zero_row_indices = torch.where(zero_rows)[0]
+            print("全0行的行索引:", zero_row_indices)
+            print("全0行的行数量:", len(zero_row_indices))
 
             # 初始化随机部分并加载文本嵌入
             self.reset_params()

@@ -71,7 +71,7 @@ class DataProcessor:
         user_data: Optional[pd.DataFrame] = None,
         movie_data: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
-        if self._prefix == "ml-1m" and movie_data is not None:
+        if movie_data is not None:
             print("movie_data is not None")
             token_embedding_map = movie_data.set_index("movie_id")["text_info_embedding"].to_dict()
             with open(f"tmp/{self._prefix}/token_embedding_map.pkl", "wb") as pickle_file:
@@ -134,11 +134,13 @@ class MovielensDataProcessor(DataProcessor):
         convert_timestamp: bool,
         expected_num_unique_items: Optional[int] = None,
         expected_max_item_id: Optional[int] = None,
+        text_embedding_model: str = 'bert-base-uncased'
     ) -> None:
         super().__init__(prefix, expected_num_unique_items, expected_max_item_id)
         self._download_path = download_path
         self._saved_name = saved_name
         self._convert_timestamp: bool = convert_timestamp
+        self._text_embedding_model = text_embedding_model
 
     def download(self) -> None:
         if not self.file_exists(self._saved_name):
@@ -236,8 +238,8 @@ class MovielensDataProcessor(DataProcessor):
                 axis=1
             )
             # 初始化 BERT 模型和 Tokenizer
-            tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-            model = BertModel.from_pretrained('bert-base-uncased')
+            tokenizer = BertTokenizer.from_pretrained(self._text_embedding_model)
+            model = BertModel.from_pretrained(self._text_embedding_model)
             model = model.to(device)
 
             def get_bert_embeddings_batch(texts):

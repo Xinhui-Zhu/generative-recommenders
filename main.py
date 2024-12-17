@@ -66,6 +66,7 @@ def mp_train_fn(
 
 def _main(argv) -> None:  # pyre-ignore [2]
     world_size = torch.cuda.device_count()
+    print("world_size =", world_size)
 
     mp.set_start_method("forkserver")
     mp.spawn(

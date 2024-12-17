@@ -11,12 +11,14 @@
 train_fn.dataset_name = "ml-20m"
 train_fn.max_sequence_length = 200
 train_fn.local_batch_size = 32
+train_fn.embedding_module_type = "withtext"
+train_fn.text_requires_grad = False     
 
 train_fn.main_module = "HSTU"
 train_fn.dropout_rate = 0.2
 train_fn.user_embedding_norm = "l2_norm"
 train_fn.num_epochs = 101
-train_fn.item_embedding_dim = 1024
+train_fn.item_embedding_dim = 0
 
 hstu_encoder.num_blocks = 16
 hstu_encoder.num_heads = 8

@@ -78,6 +78,7 @@ def eval_metrics_v2_from_tensors(
     filter_invalid_ids: bool = True,
     user_max_batch_size: Optional[int] = None,
     dtype: Optional[torch.dtype] = None,
+    special_ids: Optional[int] = None,
 ) -> Dict[str, Union[float, torch.Tensor]]:
     """
     Args:
@@ -209,7 +210,55 @@ def eval_metrics_v2_from_tensors(
             1.0, eval_ranks[target_ratings >= min_positive_rating]
         )
 
-    return output  # pyre-ignore [7]
+    if not special_ids:
+        return output
+    else:
+        special_ids_tensor = torch.tensor(special_ids, device=target_ids.device)
+        special_mask = torch.isin(target_ids.squeeze(1), special_ids_tensor)
+
+        output_for_special_id = {}
+        if special_mask.any():
+            eval_ranks_special = eval_ranks[special_mask]
+            device = eval_ranks.device
+            # 按照与 output 相同的方式计算 NDCG、HR、MRR 等指标
+            output_for_special_id = {
+                "ndcg@1": torch.where(
+                    eval_ranks_special <= 1,
+                    1.0 / torch.log2(eval_ranks_special + 1),
+                    torch.zeros(1, dtype=torch.float32, device=device),
+                ),
+                "ndcg@10": torch.where(
+                    eval_ranks_special <= 10,
+                    1.0 / torch.log2(eval_ranks_special + 1),
+                    torch.zeros(1, dtype=torch.float32, device=device),
+                ),
+                "ndcg@50": torch.where(
+                    eval_ranks_special <= 50,
+                    1.0 / torch.log2(eval_ranks_special + 1),
+                    torch.zeros(1, dtype=torch.float32, device=device),
+                ),
+                "ndcg@100": torch.where(
+                    eval_ranks_special <= 100,
+                    1.0 / torch.log2(eval_ranks_special + 1),
+                    torch.zeros(1, dtype=torch.float32, device=device),
+                ),
+                "ndcg@200": torch.where(
+                    eval_ranks_special <= 200,
+                    1.0 / torch.log2(eval_ranks_special + 1),
+                    torch.zeros(1, dtype=torch.float32, device=device),
+                ),
+                "hr@1": (eval_ranks_special <= 1),
+                "hr@10": (eval_ranks_special <= 10),
+                "hr@50": (eval_ranks_special <= 50),
+                "hr@100": (eval_ranks_special <= 100),
+                "hr@200": (eval_ranks_special <= 200),
+                "hr@500": (eval_ranks_special <= 500),
+                "hr@1000": (eval_ranks_special <= 1000),
+                "mrr": 1.0 / eval_ranks_special,
+            }
+
+        # 返回两个字典，一个是全部数据的 output，一个是特定 target_id 子集的 output_for_special_id
+        return output, output_for_special_id
 
 
 def eval_recall_metrics_from_tensors(

@@ -1,27 +1,30 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 #
-# Frozen config, validated on 04/12/2024.
+# Frozen config, validated on 04/11/2024.
 # Based on HSTU-large results in
 # Actions Speak Louder than Words: Trillion-Parameter Sequential Transducers for Generative Recommendations (https://arxiv.org/abs/2402.17152).
 #
 # Run this as:
-# mkdir -p logs/ml-20m-l200/
-# CUDA_VISIBLE_DEVICES=0 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python3 main.py --gin_config_file=configs/ml-20m/hstu-sampled-softmax-n128-large-final.gin --master_port=12345 2>&1 | tee logs/ml-20m-l200/hstu-sampled-softmax-n128-large-final.log
+# mkdir -p logs/ml-1m-l200/
+# CUDA_VISIBLE_DEVICES=1 python3 main.py --gin_config_file=configs/ml-1m/hstu-sampled-softmax-n128-large-final.gin --master_port=12346 2>&1 | tee logs/ml-1m-l200/hstu-sampled-softmax-n128-large-final.log
 
-train_fn.dataset_name = "ml-20m"
+train_fn.dataset_name = "ml-1m"
 train_fn.max_sequence_length = 200
 train_fn.local_batch_size = 32
+train_fn.gradient_accumulation_steps = 1
+train_fn.embedding_module_type = "withtext"
+train_fn.text_requires_grad = False
 
 train_fn.main_module = "HSTU"
 train_fn.dropout_rate = 0.2
 train_fn.user_embedding_norm = "l2_norm"
 train_fn.num_epochs = 101
-train_fn.item_embedding_dim = 1024
+train_fn.item_embedding_dim = 50
 
-hstu_encoder.num_blocks = 16
-hstu_encoder.num_heads = 8
-hstu_encoder.dv = 32
-hstu_encoder.dqk = 32
+hstu_encoder.num_blocks = 8
+hstu_encoder.num_heads = 2
+hstu_encoder.dqk = 25
+hstu_encoder.dv = 25
 hstu_encoder.linear_dropout_rate = 0.2
 
 train_fn.learning_rate = 1e-3

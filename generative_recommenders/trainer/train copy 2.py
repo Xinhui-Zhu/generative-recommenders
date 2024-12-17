@@ -17,7 +17,7 @@
 import logging
 import os
 import random
-from collections import defaultdict
+
 import time
 
 from datetime import date
@@ -478,8 +478,8 @@ def train_fn(
             return (epoch % full_eval_every_n) == 0
 
         # eval per epoch
-        eval_dict_all = defaultdict(list)
-        eval_dict_all_for_special_ids = defaultdict(list)
+        eval_dict_all = None
+        eval_dict_all_for_special_ids = None
 
         def update_eval_dict_all(eval_dict_all, eval_dict):
             if eval_dict_all is None:
@@ -490,7 +490,6 @@ def train_fn(
             for k, v in eval_dict.items():
                 eval_dict_all[k] = eval_dict_all[k] + [v]
             del eval_dict
-            return eval_dict_all
 
         eval_start_time = time.time()
         model.eval()
@@ -511,9 +510,6 @@ def train_fn(
             seq_features, target_ids, target_ratings = movielens_seq_features_from_row(
                 row, device=device, max_output_length=gr_output_length + 1
             )
-            for item_id in [2226, 3280]:
-                if item_id in target_ids:
-                    print(f"{item_id} in target_ids")
             eval_dict, eval_dict_for_special_ids = eval_metrics_v2_from_tensors(
                 eval_state,
                 model.module,
@@ -524,9 +520,8 @@ def train_fn(
                 dtype=torch.bfloat16 if main_module_bf16 else None,
                 special_ids=[2226, 3280]
             )
-             
-            eval_dict_all = update_eval_dict_all(eval_dict_all, eval_dict)
-            eval_dict_all_for_special_ids = update_eval_dict_all(eval_dict_all_for_special_ids, eval_dict_for_special_ids)
+            update_eval_dict_all(eval_dict_all, eval_dict)
+            update_eval_dict_all(eval_dict_all_for_special_ids, eval_dict_for_special_ids)
 
             if (eval_iter + 1 >= partial_eval_num_iters) and (not is_full_eval(epoch)):
                 logging.info(
@@ -540,6 +535,7 @@ def train_fn(
             eval_dict_all[k] = torch.cat(v, dim=-1)
         for k, v in eval_dict_all_for_special_ids.items():
             eval_dict_all_for_special_ids[k] = torch.cat(v, dim=-1)
+        
 
         ndcg_10 = _avg(eval_dict_all["ndcg@10"], world_size=world_size)
         ndcg_50 = _avg(eval_dict_all["ndcg@50"], world_size=world_size)
@@ -583,10 +579,10 @@ def train_fn(
                 "eval/hr@50": hr_50,
                 "eval/hr@10": hr_10,
                 "eval/mrr": mrr,
-                "cold_start/ndcg@10": _avg(eval_dict_all_for_special_ids["ndcg@10"], world_size=world_size),
-                "cold_start/ndcg@50": _avg(eval_dict_all_for_special_ids["ndcg@50"], world_size=world_size),
-                "cold_start/hr@10": _avg(eval_dict_all_for_special_ids["hr@10"], world_size=world_size),
-                "cold_start/hr@50": _avg(eval_dict_all_for_special_ids["hr@50"], world_size=world_size),
+                "cold_start/ndcg@50": _avg(eval_dict_all_for_special_ids["ndcg@10"], world_size=world_size),
+                "cold_start/ndcg@10": _avg(eval_dict_all_for_special_ids["ndcg@50"], world_size=world_size),
+                "cold_start/hr@50": _avg(eval_dict_all_for_special_ids["hr@10"], world_size=world_size),
+                "cold_start/hr@10": _avg(eval_dict_all_for_special_ids["hr@50"], world_size=world_size),
                 "cold_start/mrr": _avg(eval_dict_all_for_special_ids["mrr"], world_size=world_size),
                 "epoch": epoch,
                 "batch_id": batch_id
