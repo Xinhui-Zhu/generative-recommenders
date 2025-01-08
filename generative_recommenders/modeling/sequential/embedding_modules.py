@@ -45,7 +45,8 @@ class LocalEmbeddingModule(EmbeddingModule):
         num_items: int,
         item_embedding_dim: int,
         token_embedding_map_path: str = None,
-        text_requires_grad: bool = False
+        text_requires_grad: bool = False,
+        type_name: str = "only_item"
     ) -> None:
         """
         初始化 LocalEmbeddingModule
@@ -55,40 +56,17 @@ class LocalEmbeddingModule(EmbeddingModule):
         """
         super().__init__()
         self._item_embedding_dim: int = item_embedding_dim
-        self._text_embedding_dim: int = 0  # 默认为 0
         self.token_embedding_map_path = token_embedding_map_path
+        self.type_name = type_name
 
         # 检查是否需要加载文本嵌入
-        if token_embedding_map_path is not None:
-            # 加载预生成的文本嵌入
-            with open(token_embedding_map_path, "rb") as f:
-                token_embedding_map = pickle.load(f)
-
-            # 将 token_embedding_map 转换为张量
-            self._text_embedding_dim = len(next(iter(token_embedding_map.values())))
-            token_embedding_tensor = torch.zeros(
-                (num_items + 1, self._text_embedding_dim)
-            )
-            for token_id, embedding in token_embedding_map.items():
-                token_embedding_tensor[token_id] = torch.tensor(embedding)
-
+        if self.type_name == "item_concat_text":
+            token_embedding_tensor = self.get_pretrained_text_embedding()
             # 创建一个包含 ID 嵌入和文本嵌入的完整嵌入层
             total_embedding_dim = item_embedding_dim + self._text_embedding_dim
             self._item_emb = torch.nn.Embedding(
                 num_items + 1, total_embedding_dim, padding_idx=0
             )
-            print("token_embedding_tensor.shape =", token_embedding_tensor.shape)
-            # zero_rows 是一个布尔张量，表示每一行是否全为0
-            zero_rows = (token_embedding_tensor == 0).all(dim=1)
-
-            # 如果要检查是否存在任何全0的行:
-            any_zero_rows = zero_rows.any().item()
-            print("存在全0行吗？", any_zero_rows)
-
-            # 如果需要找出具体哪些行是全0行：
-            zero_row_indices = torch.where(zero_rows)[0]
-            print("全0行的行索引:", zero_row_indices)
-            print("全0行的行数量:", len(zero_row_indices))
 
             # 初始化随机部分并加载文本嵌入
             self.reset_params()
@@ -97,7 +75,24 @@ class LocalEmbeddingModule(EmbeddingModule):
                 if not text_requires_grad:
                     self._item_emb.weight[:, item_embedding_dim:].requires_grad = False
         
-        else:
+        elif self.type_name == "domain_gating":
+            token_embedding_tensor = self.get_pretrained_text_embedding()
+            self._text_emb = nn.Embedding.from_pretrained(
+                token_embedding_tensor, freeze=not text_requires_grad, padding_idx=0
+            )
+            self._item_embedding_dim = self._text_embedding_dim
+            self._item_emb = torch.nn.Embedding(
+                num_items + 1, self._item_embedding_dim, padding_idx=0
+            )
+            self.reset_params()
+            # Domain Gating 网络
+            self.gating_network = nn.Sequential(
+                nn.Linear(item_embedding_dim + text_embedding_dim, 128),
+                nn.ReLU(),
+                nn.Linear(128, 2),  # 输出两个权重值
+                nn.Softmax(dim=-1)  # 确保权重和为1
+            )            
+        elif self.type_name == "only_item":
             # 仅创建随机初始化的 ID 嵌入层
             self._item_emb = torch.nn.Embedding(
                 num_items + 1, item_embedding_dim, padding_idx=0
@@ -108,10 +103,12 @@ class LocalEmbeddingModule(EmbeddingModule):
         """
         返回调试信息
         """
-        if self.token_embedding_map_path:
-            return f"local_emb_d{self._item_embedding_dim}_text_preloaded"
-        else:
-            return f"local_emb_d{self._item_embedding_dim}"
+        if self.type_name == "item_concat_text":
+            return f"item_emb_d{self._item_embedding_dim}_concat_preloaded_text_emb_d{self._text_embedding_dim}"
+        elif self.type_name == "domain_gating":
+            return f"domain_gating_item_emb_d{self._item_embedding_dim}_text_emb_d{self._text_embedding_dim}"
+        elif self.type_name == "only_item":
+            return f"item_emb_d{self._item_embedding_dim}"
 
     def reset_params(self) -> None:
         """
@@ -120,7 +117,7 @@ class LocalEmbeddingModule(EmbeddingModule):
         for name, params in self.named_parameters():
             if "_item_emb" in name:
                 # 仅初始化随机部分
-                if self.token_embedding_map_path:
+                if self.type_name == "item_concat_text":
                     params.data[:, :self._item_embedding_dim] = truncated_normal(
                         params.data[:, :self._item_embedding_dim], mean=0.0, std=0.02
                     )
@@ -137,15 +134,65 @@ class LocalEmbeddingModule(EmbeddingModule):
 
     def get_item_embeddings(self, item_ids: torch.Tensor) -> torch.Tensor:
         """
-        获取项目嵌入
+        获取项目+文本嵌入，为不影响其他调用该方法的代码，故没有改名，其实也可以认为这个方法就是通常的forward()方法
         :param item_ids: 项目 ID 的张量
         :return: 项目嵌入
         """
-        return self._item_emb(item_ids)
+        
+        if self.type_name == "domain_gating":
+            # 获取 item 和 text 的嵌入
+            item_embeddings = self._item_emb(item_ids)
+            text_embeddings = self._text_emb(item_ids)
+
+            # 拼接两个嵌入，用于计算 gating 权重
+            concatenated_embeddings = torch.cat([item_embeddings, text_embeddings], dim=-1)
+
+            # 计算 gating 权重
+            gating_weights = self.gating_network(concatenated_embeddings)  # 输出形状为 (batch_size, 2)
+
+            # 对 item 和 text 的嵌入进行加权融合
+            weighted_item_emb = gating_weights[:, 0:1] * item_embeddings  # 权重对 item_embedding 的加权
+            weighted_text_emb = gating_weights[:, 1:2] * text_embeddings  # 权重对 text_embedding 的加权
+
+            # 返回融合后的嵌入
+            return weighted_item_emb + weighted_text_emb           
+        else:
+            return self._item_emb(item_ids)
 
     @property
     def item_embedding_dim(self) -> int:
         """
-        返回总嵌入维度
+        返回总嵌入维度，为不影响其他调用该方法的代码，故没有改名
         """
-        return self._item_embedding_dim + self._text_embedding_dim
+        if self.type_name == "item_concat_text":
+            return self._item_embedding_dim + self._text_embedding_dim
+        else:
+            return self._item_embedding_dim
+
+    def get_pretrained_text_embedding(self) -> torch.Tensor:
+        # 加载预生成的文本嵌入
+        with open(token_embedding_map_path, "rb") as f:
+            token_embedding_map = pickle.load(f)
+
+        # 将 token_embedding_map 转换为张量
+        self._text_embedding_dim = len(next(iter(token_embedding_map.values())))
+        token_embedding_tensor = torch.zeros(
+            (num_items + 1, self._text_embedding_dim)
+        )
+        for token_id, embedding in token_embedding_map.items():
+            token_embedding_tensor[token_id] = torch.tensor(embedding)
+        print("token_embedding_tensor.shape =", token_embedding_tensor.shape)
+
+        # zero_rows 是一个布尔张量，表示每一行是否全为0
+        zero_rows = (token_embedding_tensor == 0).all(dim=1)
+
+        # 如果要检查是否存在任何全0的行:
+        any_zero_rows = zero_rows.any().item()
+        print("存在全0行吗？", any_zero_rows)
+
+        # 如果需要找出具体哪些行是全0行：
+        zero_row_indices = torch.where(zero_rows)[0]
+        print("全0行的行索引:", zero_row_indices)
+        print("全0行的行数量:", len(zero_row_indices))
+
+        return token_embedding_tensor
