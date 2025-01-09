@@ -61,7 +61,6 @@ class LocalEmbeddingModule(EmbeddingModule):
         self.type_name = type_name
         self.num_items = num_items
 
-        # 检查是否需要加载文本嵌入
         if self.type_name == "item_concat_text":
             token_embedding_tensor = self.get_pretrained_text_embedding()
             # 创建一个包含 ID 嵌入和文本嵌入的完整嵌入层
@@ -74,10 +73,9 @@ class LocalEmbeddingModule(EmbeddingModule):
             self.reset_params()
             with torch.no_grad():
                 self._item_emb.weight[:, item_embedding_dim:] = token_embedding_tensor
-                if text_freeze:
-                    self._item_emb.weight[:, item_embedding_dim:].requires_grad = False
+                self._item_emb.weight[:, item_embedding_dim:].requires_grad = not text_freeze
         
-        elif self.type_name == "domain_gating":
+        elif "gating" in self.type_name:
             token_embedding_tensor = self.get_pretrained_text_embedding()
             self._text_emb = nn.Embedding.from_pretrained(
                 token_embedding_tensor, freeze=text_freeze, padding_idx=0
@@ -87,13 +85,10 @@ class LocalEmbeddingModule(EmbeddingModule):
                 num_items + 1, self._item_embedding_dim, padding_idx=0
             )
             self.reset_params()
-            # Domain Gating 网络
-            self.gating_network = nn.Sequential(
-                nn.Linear(self._item_embedding_dim + self._text_embedding_dim, 128),
-                nn.ReLU(),
-                nn.Linear(128, 2),  # 输出两个权重值
-                nn.Softmax(dim=-1)  # 确保权重和为1
-            )            
+            if self.type_name == "domain_gating":
+                self.item_domain_embedding = torch.nn.Parameter(torch.randn(self._item_embedding_dim) * 0.02)
+                self.text_domain_embedding = torch.nn.Parameter(torch.randn(self._text_embedding_dim) * 0.02)
+        
         elif self.type_name == "only_item":
             # 仅创建随机初始化的 ID 嵌入层
             self._item_emb = nn.Embedding(
@@ -107,8 +102,8 @@ class LocalEmbeddingModule(EmbeddingModule):
         """
         if self.type_name == "item_concat_text":
             return f"item_emb_d{self._item_embedding_dim}_concat_preloaded_text_emb_d{self._text_embedding_dim}"
-        elif self.type_name == "domain_gating":
-            return f"domain_gating_item_emb_d{self._item_embedding_dim}_text_emb_d{self._text_embedding_dim}"
+        elif "gating" in self.type_name:
+            return f"{self.type_name}_item_emb_d{self._item_embedding_dim}_text_emb_d{self._text_embedding_dim}"
         elif self.type_name == "only_item":
             return f"item_emb_d{self._item_embedding_dim}"
 
@@ -146,18 +141,23 @@ class LocalEmbeddingModule(EmbeddingModule):
             item_embeddings = self._item_emb(item_ids)
             text_embeddings = self._text_emb(item_ids)
 
-            # 拼接两个嵌入，用于计算 gating 权重
-            concatenated_embeddings = torch.cat([item_embeddings, text_embeddings], dim=-1)
+            # 计算权重
+            item_weight = torch.exp(torch.sum(self.item_domain_embedding * item_embeddings, dim=-1, keepdim=True))
+            text_weight = torch.exp(torch.sum(self.text_domain_embedding * text_embeddings, dim=-1, keepdim=True))
+            total_weight = item_weight + text_weight
 
-            # 计算 gating 权重
-            gating_weights = self.gating_network(concatenated_embeddings)  # 输出形状为 (batch_size, 2)
+            item_weight = item_weight / total_weight
+            text_weight = text_weight / total_weight
 
-            # 对 item 和 text 的嵌入进行加权融合
-            weighted_item_emb = gating_weights[:, :, 0:1] * item_embeddings  # 权重对 item_embedding 的加权
-            weighted_text_emb = gating_weights[:, :, 1:2] * text_embeddings  # 权重对 text_embedding 的加权
+            # 加权融合
+            weighted_item_emb = item_weight * item_embeddings
+            weighted_text_emb = text_weight * text_embeddings
 
-            # 返回融合后的嵌入
-            return weighted_item_emb + weighted_text_emb           
+            return weighted_item_emb + weighted_text_emb
+        elif self.type_name == "mean_gating":
+            item_embeddings = self._item_emb(item_ids)
+            text_embeddings = self._text_emb(item_ids)
+            return (item_embeddings + text_embeddings) / 2
         else:
             return self._item_emb(item_ids)
 

@@ -12,14 +12,14 @@ train_fn.dataset_name = "ml-1m"
 train_fn.max_sequence_length = 200
 train_fn.local_batch_size = 32
 train_fn.gradient_accumulation_steps = 1
-train_fn.embedding_module_type = "item_concat_text"
+train_fn.embedding_module_type = "mean_gating"
 train_fn.text_freeze = True
 
 train_fn.main_module = "HSTU"
 train_fn.dropout_rate = 0.2
 train_fn.user_embedding_norm = "l2_norm"
 train_fn.num_epochs = 101
-train_fn.item_embedding_dim = 0
+train_fn.item_embedding_dim = 768
 
 hstu_encoder.num_blocks = 8
 hstu_encoder.num_heads = 2

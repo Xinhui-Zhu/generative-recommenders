@@ -126,7 +126,7 @@ def train_fn(
     full_eval_every_n: int = 1,
     save_ckpt_every_n: int = 1000,
     partial_eval_num_iters: int = 32,
-    embedding_module_type: str = "local",
+    embedding_module_type: str = "only_item",
     text_freeze: bool = True,
     item_embedding_dim: int = 240,
     interaction_module_type: str = "",
@@ -186,7 +186,7 @@ def train_fn(
     )
 
     model_debug_str = main_module
-    if embedding_module_type == "local":
+    if embedding_module_type == "only_item":
         embedding_module: EmbeddingModule = LocalEmbeddingModule(
             num_items=dataset.max_item_id,
             item_embedding_dim=item_embedding_dim,
