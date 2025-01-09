@@ -86,8 +86,8 @@ class LocalEmbeddingModule(EmbeddingModule):
             )
             self.reset_params()
             if self.type_name == "domain_gating":
-                self.item_domain_embedding = torch.nn.Parameter(torch.randn(self._item_embedding_dim) * 0.02)
-                self.text_domain_embedding = torch.nn.Parameter(torch.randn(self._text_embedding_dim) * 0.02)
+                self.domain_embedding = torch.nn.Parameter(torch.randn(self._item_embedding_dim) * 0.02)
+                # self.text_domain_embedding = torch.nn.Parameter(torch.randn(self._text_embedding_dim) * 0.02)
         
         elif self.type_name == "only_item":
             # 仅创建随机初始化的 ID 嵌入层
@@ -142,8 +142,8 @@ class LocalEmbeddingModule(EmbeddingModule):
             text_embeddings = self._text_emb(item_ids)
 
             # 计算权重
-            item_weight = torch.exp(torch.sum(self.item_domain_embedding * item_embeddings, dim=-1, keepdim=True))
-            text_weight = torch.exp(torch.sum(self.text_domain_embedding * text_embeddings, dim=-1, keepdim=True))
+            item_weight = torch.exp(torch.sum(self.domain_embedding * item_embeddings, dim=-1, keepdim=True))
+            text_weight = torch.exp(torch.sum(self.domain_embedding * text_embeddings, dim=-1, keepdim=True))
             total_weight = item_weight + text_weight
 
             item_weight = item_weight / total_weight

@@ -27,7 +27,7 @@ hstu_encoder.dqk = 25
 hstu_encoder.dv = 25
 hstu_encoder.linear_dropout_rate = 0.2
 
-train_fn.learning_rate = 1e-3
+train_fn.learning_rate = 5e-3
 train_fn.weight_decay = 0
 train_fn.num_warmup_steps = 0
 
