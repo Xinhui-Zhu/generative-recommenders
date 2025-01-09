@@ -127,7 +127,7 @@ def train_fn(
     save_ckpt_every_n: int = 1000,
     partial_eval_num_iters: int = 32,
     embedding_module_type: str = "local",
-    text_requires_grad: bool = False,
+    text_freeze: bool = True,
     item_embedding_dim: int = 240,
     interaction_module_type: str = "",
     gr_output_length: int = 10,
@@ -140,7 +140,8 @@ def train_fn(
     # Initialize WandB
     if rank == 0:
         project_name = 'generative-recommenders' if dataset_name=="ml-1m" else f'generative-recommenders-{dataset_name}' 
-        run_name = f"{embedding_module_type}-bs{local_batch_size}*{gradient_accumulation_steps}-emb{item_embedding_dim}-{text_requires_grad}" if embedding_module_type == "withtext" else f"{embedding_module_type}-bs{local_batch_size}*{gradient_accumulation_steps}-emb{item_embedding_dim}"
+        freeze = "freeze" if text_freeze else "not freeze"
+        run_name = f"{embedding_module_type}-bs{local_batch_size}*{gradient_accumulation_steps}-emb{item_embedding_dim}-{freeze}" if embedding_module_type == "withtext" else f"{embedding_module_type}-bs{local_batch_size}*{gradient_accumulation_steps}-emb{item_embedding_dim}"
         wandb.init(project=project_name, 
             name=run_name,
             config={
@@ -190,16 +191,16 @@ def train_fn(
             num_items=dataset.max_item_id,
             item_embedding_dim=item_embedding_dim,
         )
-    elif embedding_module_type == "withtext":
+    else:
         embedding_module: EmbeddingModule = LocalEmbeddingModule(
             num_items=dataset.max_item_id,
             item_embedding_dim=item_embedding_dim,
+            type_name=embedding_module_type,
             token_embedding_map_path = f"tmp/{dataset_name}/token_embedding_map.pkl",
-            text_requires_grad = text_requires_grad,
+            text_freeze = text_freeze,
         )
         item_embedding_dim=embedding_module.item_embedding_dim
-    else:
-        raise ValueError(f"Unknown embedding_module_type {embedding_module_type}")
+    
     model_debug_str += f"-{embedding_module.debug_str()}"
 
     interaction_module, interaction_module_debug_str = get_similarity_function(

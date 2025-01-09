@@ -17,11 +17,12 @@
 import abc
 
 import torch
+import torch.nn as nn
 
 from generative_recommenders.modeling.initialization import truncated_normal
 
 
-class EmbeddingModule(torch.nn.Module):
+class EmbeddingModule(nn.Module):
 
     @abc.abstractmethod
     def debug_str(self) -> str:
@@ -45,7 +46,7 @@ class LocalEmbeddingModule(EmbeddingModule):
         num_items: int,
         item_embedding_dim: int,
         token_embedding_map_path: str = None,
-        text_requires_grad: bool = False,
+        text_freeze: bool = True,
         type_name: str = "only_item"
     ) -> None:
         """
@@ -58,13 +59,14 @@ class LocalEmbeddingModule(EmbeddingModule):
         self._item_embedding_dim: int = item_embedding_dim
         self.token_embedding_map_path = token_embedding_map_path
         self.type_name = type_name
+        self.num_items = num_items
 
         # 检查是否需要加载文本嵌入
         if self.type_name == "item_concat_text":
             token_embedding_tensor = self.get_pretrained_text_embedding()
             # 创建一个包含 ID 嵌入和文本嵌入的完整嵌入层
             total_embedding_dim = item_embedding_dim + self._text_embedding_dim
-            self._item_emb = torch.nn.Embedding(
+            self._item_emb = nn.Embedding(
                 num_items + 1, total_embedding_dim, padding_idx=0
             )
 
@@ -72,29 +74,29 @@ class LocalEmbeddingModule(EmbeddingModule):
             self.reset_params()
             with torch.no_grad():
                 self._item_emb.weight[:, item_embedding_dim:] = token_embedding_tensor
-                if not text_requires_grad:
+                if text_freeze:
                     self._item_emb.weight[:, item_embedding_dim:].requires_grad = False
         
         elif self.type_name == "domain_gating":
             token_embedding_tensor = self.get_pretrained_text_embedding()
             self._text_emb = nn.Embedding.from_pretrained(
-                token_embedding_tensor, freeze=not text_requires_grad, padding_idx=0
+                token_embedding_tensor, freeze=text_freeze, padding_idx=0
             )
             self._item_embedding_dim = self._text_embedding_dim
-            self._item_emb = torch.nn.Embedding(
+            self._item_emb = nn.Embedding(
                 num_items + 1, self._item_embedding_dim, padding_idx=0
             )
             self.reset_params()
             # Domain Gating 网络
             self.gating_network = nn.Sequential(
-                nn.Linear(item_embedding_dim + text_embedding_dim, 128),
+                nn.Linear(self._item_embedding_dim + self._text_embedding_dim, 128),
                 nn.ReLU(),
                 nn.Linear(128, 2),  # 输出两个权重值
                 nn.Softmax(dim=-1)  # 确保权重和为1
             )            
         elif self.type_name == "only_item":
             # 仅创建随机初始化的 ID 嵌入层
-            self._item_emb = torch.nn.Embedding(
+            self._item_emb = nn.Embedding(
                 num_items + 1, item_embedding_dim, padding_idx=0
             )
             self.reset_params()
@@ -151,8 +153,8 @@ class LocalEmbeddingModule(EmbeddingModule):
             gating_weights = self.gating_network(concatenated_embeddings)  # 输出形状为 (batch_size, 2)
 
             # 对 item 和 text 的嵌入进行加权融合
-            weighted_item_emb = gating_weights[:, 0:1] * item_embeddings  # 权重对 item_embedding 的加权
-            weighted_text_emb = gating_weights[:, 1:2] * text_embeddings  # 权重对 text_embedding 的加权
+            weighted_item_emb = gating_weights[:, :, 0:1] * item_embeddings  # 权重对 item_embedding 的加权
+            weighted_text_emb = gating_weights[:, :, 1:2] * text_embeddings  # 权重对 text_embedding 的加权
 
             # 返回融合后的嵌入
             return weighted_item_emb + weighted_text_emb           
@@ -171,13 +173,13 @@ class LocalEmbeddingModule(EmbeddingModule):
 
     def get_pretrained_text_embedding(self) -> torch.Tensor:
         # 加载预生成的文本嵌入
-        with open(token_embedding_map_path, "rb") as f:
+        with open(self.token_embedding_map_path, "rb") as f:
             token_embedding_map = pickle.load(f)
 
         # 将 token_embedding_map 转换为张量
         self._text_embedding_dim = len(next(iter(token_embedding_map.values())))
         token_embedding_tensor = torch.zeros(
-            (num_items + 1, self._text_embedding_dim)
+            (self.num_items + 1, self._text_embedding_dim)
         )
         for token_id, embedding in token_embedding_map.items():
             token_embedding_tensor[token_id] = torch.tensor(embedding)
