@@ -134,6 +134,7 @@ def train_fn(
     l2_norm_eps: float = 1e-6,
     enable_tf32: bool = False,
     random_seed: int = 42,
+    pretrained_model_path: str = None
 ) -> None:
 
 
@@ -328,8 +329,31 @@ def train_fn(
     torch.autograd.set_detect_anomaly(True)
 
     batch_id = 0
-    epoch = 0
-    for epoch in range(num_epochs):
+
+    # 在训练之前添加模型加载逻辑
+    if os.path.exists(pretrained_model_path):
+        checkpoint = torch.load(pretrained_model_path, map_location=f"cuda:{rank}")
+        state_dict = checkpoint["model_state_dict"]
+
+        # 如果发现键以 "module." 开头，则移除前缀
+        new_state_dict = {}
+        for key, value in state_dict.items():
+            new_key = key.replace("module.", "")  # 去掉 "module." 前缀
+            if "_embedding__item_emb.weight" in new_key:
+                new_key = new_key.replace("_embedding__item_emb.weight", "_embedding_module._item_emb.weight")
+
+            new_state_dict[new_key] = value
+
+        model.module.load_state_dict(new_state_dict)
+        opt.load_state_dict(checkpoint["optimizer_state_dict"])
+        start_epoch = checkpoint["epoch"] + 1
+        logging.info(f"Loaded pretrained model from {pretrained_model_path}, starting from epoch {start_epoch}")
+    else:
+        start_epoch = 0
+        logging.info(f"Starting from scratch.")
+
+
+    for epoch in range(start_epoch, num_epochs):
         if train_data_sampler is not None:
             train_data_sampler.set_epoch(epoch)
         if eval_data_sampler is not None:

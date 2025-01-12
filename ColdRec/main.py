@@ -51,6 +51,39 @@ if __name__ == '__main__':
     cold_item_idx = data_info_dict['cold_item']
     print(f"Dataset: {args.dataset}, User num: {user_num}, Item num: {item_num}.")
 
+    for _ in range(2):
+        train_set = set([i[_] for i in training_data])
+        valid_set = set([i[_] for i in cold_valid_data])
+        test_set = set([i[_] for i in cold_test_data])
+        # 逐对求交集
+        train_valid_duplicates = train_set.intersection(valid_set)
+        train_test_duplicates = train_set.intersection(test_set)
+        valid_test_duplicates = valid_set.intersection(test_set)
+
+        # 查看三者共同的交集（如有需要）
+        all_three_duplicates = train_set.intersection(valid_set).intersection(test_set)
+
+        # 分别打印出交集
+        if train_valid_duplicates:
+            print("Train 和 Valid 集合的重复元素:", len(train_valid_duplicates))
+        else:
+            print("Train 和 Valid 集合没有重复元素")
+
+        if train_test_duplicates:
+            print("Train 和 Test 集合的重复元素:", len(train_test_duplicates))
+        else:
+            print("Train 和 Test 集合没有重复元素")
+
+        if valid_test_duplicates:
+            print("Valid 和 Test 集合的重复元素:", len(valid_test_duplicates))
+        else:
+            print("Valid 和 Test 集合没有重复元素")
+
+        if all_three_duplicates:
+            print("Train, Valid, Test 三个集合都有的重复元素:", len(all_three_duplicates))
+        else:
+            print("没有在 Train, Valid, Test 三个集合都出现的元素")
+
     # content obtaining
     user_content, item_content = None, None
     if args.cold_object == 'user':

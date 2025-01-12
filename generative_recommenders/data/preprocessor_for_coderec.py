@@ -71,12 +71,16 @@ class DataProcessor:
         user_data: Optional[pd.DataFrame] = None,
         movie_data: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
-        # if movie_data is not None:
-        #     print("movie_data is not None")
-        #     token_embedding_map = movie_data.set_index("movie_id")["text_info_embedding"].to_dict()
-        #     with open(f"tmp/{self._prefix}/token_embedding_map.pkl", "wb") as pickle_file:
-        #         pickle.dump(token_embedding_map, pickle_file)
-            
+        if movie_data is not None:
+            print("movie_data is not None")
+            token_embedding_map = movie_data.set_index("movie_id")["text_info_embedding"].to_dict()
+            with open(f"tmp/{self._prefix}/token_embedding_map.pkl", "wb") as pickle_file:
+                pickle.dump(token_embedding_map, pickle_file)
+            # tqdm.pandas(desc="Processing sequentialization")
+            # ratings_data["sequence_item_texts"] = ratings_data["item_ids"].progress_apply(
+            #     lambda items: [movie_text_map[item] for item in items]
+            # )
+
         if user_data is not None:
             ratings_data_transformed = ratings_data.join(
                 user_data.set_index("user_id"), on="user_id"
@@ -88,6 +92,7 @@ class DataProcessor:
             lambda x: len(x)
         )
         ratings_data_transformed['sequence_len'].describe()
+
         ratings_data_transformed.item_ids = ratings_data_transformed.item_ids.apply(
             lambda x: ",".join([str(v) for v in x])
         )
@@ -237,6 +242,10 @@ class MovielensDataProcessor(DataProcessor):
                 lambda row: f"{row['title']}, {row['genres']}",
                 axis=1
             )
+            # 初始化 BERT 模型和 Tokenizer
+            tokenizer = BertTokenizer.from_pretrained(self._text_embedding_model)
+            model = BertModel.from_pretrained(self._text_embedding_model)
+            model = model.to(device)
 
             def get_bert_embeddings_batch(texts):
                 """
@@ -244,11 +253,6 @@ class MovielensDataProcessor(DataProcessor):
                 :param texts: List[str], 输入句子列表
                 :return: List[torch.Tensor], 每个句子的 (768,) 嵌入
                 """
-                # 初始化 BERT 模型和 Tokenizer
-                tokenizer = BertTokenizer.from_pretrained(self._text_embedding_model)
-                model = BertModel.from_pretrained(self._text_embedding_model)
-                model = model.to(device)
-
                 inputs = tokenizer(
                     texts,
                     return_tensors="pt",
@@ -265,15 +269,18 @@ class MovielensDataProcessor(DataProcessor):
                 embeddings = outputs.last_hidden_state[:, 0, :].cpu().tolist()  # 移动回 CPU
                 return embeddings
 
+            def bert_tokenize_to_ids(text):
+                return tokenizer.encode(text, add_special_tokens=True)
+
             batch_size = 32
             all_embeddings = []
 
-            # for i in tqdm(range(0, len(movies), batch_size)):
-            #     batch_texts = movies["text_info"].iloc[i:i+batch_size].tolist()
-            #     batch_embeddings = get_bert_embeddings_batch(batch_texts)
-            #     all_embeddings.extend(batch_embeddings)
+            for i in tqdm(range(0, len(movies), batch_size)):
+                batch_texts = movies["text_info"].iloc[i:i+batch_size].tolist()
+                batch_embeddings = get_bert_embeddings_batch(batch_texts)
+                all_embeddings.extend(batch_embeddings)
 
-            # movies["text_info_embedding"] = all_embeddings
+            movies["text_info_embedding"] = all_embeddings
 
         if users is not None:
             ## Users (ml-1m only)

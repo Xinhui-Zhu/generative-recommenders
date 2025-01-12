@@ -3,6 +3,9 @@ tmp/
 exps/
 ckpts/
 wandb/
+ColdRec/data
+ColdRec/emb
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

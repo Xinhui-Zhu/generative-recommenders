@@ -63,6 +63,7 @@ In the above script, the **[DATASET NAME]** for --dataset should be replaced by 
 Coming to this step, you can start to train the cold-start model with one script:
 ``` bash
 python main.py --dataset [DATASET NAME] --model [MODEL NAME] --cold_object [user/item]
+python main.py --dataset movielens --model GoRec --cold_object item
 ```
 In the above script, the **[MODEL NAME]** for --model is the expected model name, where we have provided 20 representative models as the **Supported Models**. You can also flexibly register your own model with the ColdRec framework for evaluation.
 

@@ -18,8 +18,9 @@ train_fn.text_freeze = True
 train_fn.main_module = "HSTU"
 train_fn.dropout_rate = 0.2
 train_fn.user_embedding_norm = "l2_norm"
-train_fn.num_epochs = 101
+train_fn.num_epochs = 103
 train_fn.item_embedding_dim = 0
+train_fn.pretrained_model_path = "ckpts/ml-1m-l200/HSTU-b8-h2-dqk25-dv25-lsilud0.2-ad0.0_DotProduct_local-l2-eps1e-06_ssl-t0.05-n128-b32-lr0.001-wu0-wd0-2024-12-16_ep100"
 
 hstu_encoder.num_blocks = 8
 hstu_encoder.num_heads = 2
