@@ -188,6 +188,8 @@ class DatasetV2(torch.utils.data.Dataset):
             "target_ratings": target_ratings,
             "target_timestamps": target_timestamps,
         }
+        # print("historical_ids", ret['historical_ids'].shape) # [200]
+        # print("target_ids", ret['target_ids'].shape) # int
         return ret
 
 

@@ -134,7 +134,8 @@ def train_fn(
     l2_norm_eps: float = 1e-6,
     enable_tf32: bool = False,
     random_seed: int = 42,
-    pretrained_model_path: str = None
+    pretrained_model_path: str = None, 
+    special_ids: list = None # [2226, 3280]
 ) -> None:
 
 
@@ -331,23 +332,24 @@ def train_fn(
     batch_id = 0
 
     # 在训练之前添加模型加载逻辑
-    if os.path.exists(pretrained_model_path):
-        checkpoint = torch.load(pretrained_model_path, map_location=f"cuda:{rank}")
-        state_dict = checkpoint["model_state_dict"]
+    if pretrained_model_path:
+        if os.path.exists(pretrained_model_path):
+            checkpoint = torch.load(pretrained_model_path, map_location=f"cuda:{rank}")
+            state_dict = checkpoint["model_state_dict"]
 
-        # 如果发现键以 "module." 开头，则移除前缀
-        new_state_dict = {}
-        for key, value in state_dict.items():
-            new_key = key.replace("module.", "")  # 去掉 "module." 前缀
-            if "_embedding__item_emb.weight" in new_key:
-                new_key = new_key.replace("_embedding__item_emb.weight", "_embedding_module._item_emb.weight")
+            # 如果发现键以 "module." 开头，则移除前缀
+            new_state_dict = {}
+            for key, value in state_dict.items():
+                new_key = key.replace("module.", "")  # 去掉 "module." 前缀
+                if "_embedding__item_emb.weight" in new_key:
+                    new_key = new_key.replace("_embedding__item_emb.weight", "_embedding_module._item_emb.weight")
 
-            new_state_dict[new_key] = value
+                new_state_dict[new_key] = value
 
-        model.module.load_state_dict(new_state_dict)
-        opt.load_state_dict(checkpoint["optimizer_state_dict"])
-        start_epoch = checkpoint["epoch"] + 1
-        logging.info(f"Loaded pretrained model from {pretrained_model_path}, starting from epoch {start_epoch}")
+            model.module.load_state_dict(new_state_dict)
+            opt.load_state_dict(checkpoint["optimizer_state_dict"])
+            start_epoch = checkpoint["epoch"] + 1
+            logging.info(f"Loaded pretrained model from {pretrained_model_path}, starting from epoch {start_epoch}")
     else:
         start_epoch = 0
         logging.info(f"Starting from scratch.")
@@ -382,7 +384,7 @@ def train_fn(
                     device=device,
                     float_dtype=torch.bfloat16 if main_module_bf16 else None,
                 )
-                eval_dict = eval_metrics_v2_from_tensors(
+                eval_dict, _ = eval_metrics_v2_from_tensors(
                     eval_state,
                     model.module,
                     seq_features,
@@ -547,11 +549,12 @@ def train_fn(
                 target_ratings=target_ratings,
                 user_max_batch_size=eval_user_max_batch_size,
                 dtype=torch.bfloat16 if main_module_bf16 else None,
-                special_ids=[2226, 3280]
+                special_ids=special_ids
             )
              
             eval_dict_all = update_eval_dict_all(eval_dict_all, eval_dict)
-            eval_dict_all_for_special_ids = update_eval_dict_all(eval_dict_all_for_special_ids, eval_dict_for_special_ids)
+            if eval_dict_for_special_ids:
+                eval_dict_all_for_special_ids = update_eval_dict_all(eval_dict_all_for_special_ids, eval_dict_for_special_ids)
 
             if (eval_iter + 1 >= partial_eval_num_iters) and (not is_full_eval(epoch)):
                 logging.info(
@@ -560,11 +563,12 @@ def train_fn(
                 break
 
         assert eval_dict_all is not None
-        assert eval_dict_all_for_special_ids is not None
         for k, v in eval_dict_all.items():
             eval_dict_all[k] = torch.cat(v, dim=-1)
-        for k, v in eval_dict_all_for_special_ids.items():
-            eval_dict_all_for_special_ids[k] = torch.cat(v, dim=-1)
+        if eval_dict_for_special_ids:
+            assert eval_dict_all_for_special_ids is not None
+            for k, v in eval_dict_all_for_special_ids.items():
+                eval_dict_all_for_special_ids[k] = torch.cat(v, dim=-1)
 
         ndcg_10 = _avg(eval_dict_all["ndcg@10"], world_size=world_size)
         ndcg_50 = _avg(eval_dict_all["ndcg@50"], world_size=world_size)
@@ -608,14 +612,17 @@ def train_fn(
                 "eval/hr@50": hr_50,
                 "eval/hr@10": hr_10,
                 "eval/mrr": mrr,
-                "cold_start/ndcg@10": _avg(eval_dict_all_for_special_ids["ndcg@10"], world_size=world_size),
-                "cold_start/ndcg@50": _avg(eval_dict_all_for_special_ids["ndcg@50"], world_size=world_size),
-                "cold_start/hr@10": _avg(eval_dict_all_for_special_ids["hr@10"], world_size=world_size),
-                "cold_start/hr@50": _avg(eval_dict_all_for_special_ids["hr@50"], world_size=world_size),
-                "cold_start/mrr": _avg(eval_dict_all_for_special_ids["mrr"], world_size=world_size),
                 "epoch": epoch,
                 "batch_id": batch_id
             })
+            if eval_dict_for_special_ids:
+                wandb.log({
+                    "cold_start/ndcg@10": _avg(eval_dict_all_for_special_ids["ndcg@10"], world_size=world_size),
+                    "cold_start/ndcg@50": _avg(eval_dict_all_for_special_ids["ndcg@50"], world_size=world_size),
+                    "cold_start/hr@10": _avg(eval_dict_all_for_special_ids["hr@10"], world_size=world_size),
+                    "cold_start/hr@50": _avg(eval_dict_all_for_special_ids["hr@50"], world_size=world_size),
+                    "cold_start/mrr": _avg(eval_dict_all_for_special_ids["mrr"], world_size=world_size),
+                })
         last_training_time = time.time()
 
     if rank == 0:

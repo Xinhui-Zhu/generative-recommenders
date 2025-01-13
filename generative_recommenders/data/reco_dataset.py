@@ -41,23 +41,42 @@ def get_reco_dataset(
     max_sequence_length: int,
     chronological: bool,
     positional_sampling_ratio: float = 1.0,
+    cold_rec: bool = True
 ) -> RecoDataset:
     if dataset_name == "ml-1m":
         dp = get_common_preprocessors()[dataset_name]
-        train_dataset = DatasetV2(
-            ratings_file=dp.output_format_csv(),
-            padding_length=max_sequence_length + 1,  # target
-            ignore_last_n=1,
-            chronological=chronological,
-            sample_ratio=positional_sampling_ratio,
-        )
-        eval_dataset = DatasetV2(
-            ratings_file=dp.output_format_csv(),
-            padding_length=max_sequence_length + 1,  # target
-            ignore_last_n=0,
-            chronological=chronological,
-            sample_ratio=1.0,  # do not sample
-        )
+        if cold_rec:
+            train_dataset = DatasetV2(
+                ratings_file=dp.sasrec_format_csv_by_user_train(),
+                padding_length=max_sequence_length + 1,  # target
+                ignore_last_n=0,
+                chronological=chronological,
+                sample_ratio=positional_sampling_ratio,
+            )
+            eval_dataset = DatasetV2(
+                ratings_file=dp.sasrec_format_csv_by_user_test(),
+                padding_length=max_sequence_length + 1,  # target
+                ignore_last_n=0,
+                chronological=chronological,
+                sample_ratio=1.0,  # do not sample
+            )
+        else:
+            train_dataset = DatasetV2(
+                ratings_file=dp.output_format_csv(),
+                padding_length=max_sequence_length + 1,  # target
+                ignore_last_n=1,
+                chronological=chronological,
+                sample_ratio=positional_sampling_ratio,
+            )
+            eval_dataset = DatasetV2(
+                ratings_file=dp.output_format_csv(),
+                padding_length=max_sequence_length + 1,  # target
+                ignore_last_n=0,
+                chronological=chronological,
+                sample_ratio=1.0,  # do not sample
+            )
+        print("len(train_dataset) =", len(train_dataset))
+        print("len(eval_dataset) =", len(eval_dataset))
     elif dataset_name == "ml-20m":
         dp = get_common_preprocessors()[dataset_name]
         train_dataset = DatasetV2(

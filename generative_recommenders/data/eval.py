@@ -211,7 +211,7 @@ def eval_metrics_v2_from_tensors(
         )
 
     if not special_ids:
-        return output
+        return output, None
     else:
         special_ids_tensor = torch.tensor(special_ids, device=target_ids.device)
         special_mask = torch.isin(target_ids.squeeze(1), special_ids_tensor)

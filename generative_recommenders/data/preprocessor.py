@@ -71,11 +71,11 @@ class DataProcessor:
         user_data: Optional[pd.DataFrame] = None,
         movie_data: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
-        # if movie_data is not None:
-        #     print("movie_data is not None")
-        #     token_embedding_map = movie_data.set_index("movie_id")["text_info_embedding"].to_dict()
-        #     with open(f"tmp/{self._prefix}/token_embedding_map.pkl", "wb") as pickle_file:
-        #         pickle.dump(token_embedding_map, pickle_file)
+        if movie_data is not None:
+            print("movie_data is not None")
+            token_embedding_map = movie_data.set_index("movie_id")["text_info_embedding"].to_dict()
+            with open(f"tmp/{self._prefix}/token_embedding_map.pkl", "wb") as pickle_file:
+                pickle.dump(token_embedding_map, pickle_file)
             
         if user_data is not None:
             ratings_data_transformed = ratings_data.join(
@@ -268,12 +268,12 @@ class MovielensDataProcessor(DataProcessor):
             batch_size = 32
             all_embeddings = []
 
-            # for i in tqdm(range(0, len(movies), batch_size)):
-            #     batch_texts = movies["text_info"].iloc[i:i+batch_size].tolist()
-            #     batch_embeddings = get_bert_embeddings_batch(batch_texts)
-            #     all_embeddings.extend(batch_embeddings)
+            for i in tqdm(range(0, len(movies), batch_size)):
+                batch_texts = movies["text_info"].iloc[i:i+batch_size].tolist()
+                batch_embeddings = get_bert_embeddings_batch(batch_texts)
+                all_embeddings.extend(batch_embeddings)
 
-            # movies["text_info_embedding"] = all_embeddings
+            movies["text_info_embedding"] = all_embeddings
 
         if users is not None:
             ## Users (ml-1m only)

@@ -12,7 +12,7 @@ train_fn.dataset_name = "ml-1m"
 train_fn.max_sequence_length = 200
 train_fn.local_batch_size = 32
 train_fn.gradient_accumulation_steps = 1
-train_fn.embedding_module_type = "with_text"
+train_fn.embedding_module_type = "item_concat_text"
 train_fn.text_freeze = True
 
 train_fn.main_module = "HSTU"
