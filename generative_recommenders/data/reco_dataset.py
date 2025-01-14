@@ -41,20 +41,21 @@ def get_reco_dataset(
     max_sequence_length: int,
     chronological: bool,
     positional_sampling_ratio: float = 1.0,
-    cold_rec: bool = True
+    cold_rec: bool = True,
+    user_info: bool = False,
 ) -> RecoDataset:
     if dataset_name == "ml-1m":
         dp = get_common_preprocessors()[dataset_name]
         if cold_rec:
             train_dataset = DatasetV2(
-                ratings_file=dp.sasrec_format_csv_by_user_train(),
+                ratings_file=dp.sasrec_format_csv_by_user_train(user_info),
                 padding_length=max_sequence_length + 1,  # target
                 ignore_last_n=0,
                 chronological=chronological,
                 sample_ratio=positional_sampling_ratio,
             )
             eval_dataset = DatasetV2(
-                ratings_file=dp.sasrec_format_csv_by_user_test(),
+                ratings_file=dp.sasrec_format_csv_by_user_test_for_user_cold_rec(user_info),
                 padding_length=max_sequence_length + 1,  # target
                 ignore_last_n=0,
                 chronological=chronological,
@@ -130,6 +131,7 @@ def get_reco_dataset(
         items = pd.read_csv(dp.processed_item_csv(), delimiter=",")
         max_jagged_dimension = 16
         expected_max_item_id = dp.expected_max_item_id()
+        print("expected_max_item_id", expected_max_item_id)
         assert expected_max_item_id is not None
         item_features: ItemFeatures = ItemFeatures(
             max_ind_range=[63, 16383, 511],

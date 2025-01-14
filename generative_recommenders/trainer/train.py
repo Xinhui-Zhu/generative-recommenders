@@ -135,15 +135,21 @@ def train_fn(
     enable_tf32: bool = False,
     random_seed: int = 42,
     pretrained_model_path: str = None, 
-    special_ids: list = None # [2226, 3280]
+    special_ids: list = None, # [2226, 3280]
+    # [2198, 2703, 2909, 2845, 3530, 3607]
+    user_info: bool = False,
 ) -> None:
 
 
     # Initialize WandB
     if rank == 0:
-        project_name = 'generative-recommenders' if dataset_name=="ml-1m" else f'generative-recommenders-{dataset_name}' 
         freeze = "freeze" if text_freeze else "not freeze"
-        run_name = f"{embedding_module_type}-bs{local_batch_size}*{gradient_accumulation_steps}-emb{item_embedding_dim}-{freeze}" if embedding_module_type == "withtext" else f"{embedding_module_type}-bs{local_batch_size}*{gradient_accumulation_steps}-emb{item_embedding_dim}"
+        note = "generative-recommenders-for-user-cold-rec-len=5"
+        project_name = note if dataset_name=="ml-1m" else f'{note}-{dataset_name}' 
+        if embedding_module_type == "withtext":
+            run_name = f"{embedding_module_type}-bs{local_batch_size}*{gradient_accumulation_steps}-emb{item_embedding_dim}-{user_info}-{freeze}" 
+        else:
+            run_name = f"{embedding_module_type}-bs{local_batch_size}*{gradient_accumulation_steps}-emb{item_embedding_dim}-{user_info}"
         wandb.init(project=project_name, 
             name=run_name,
             config={
@@ -168,6 +174,7 @@ def train_fn(
         max_sequence_length=max_sequence_length,
         chronological=True,
         positional_sampling_ratio=positional_sampling_ratio,
+        user_info=user_info,
     )
 
     train_data_sampler, train_data_loader = create_data_loader(

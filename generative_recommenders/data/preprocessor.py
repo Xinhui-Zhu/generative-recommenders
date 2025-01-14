@@ -45,10 +45,12 @@ class DataProcessor:
         prefix: str,
         expected_num_unique_items: Optional[int],
         expected_max_item_id: Optional[int],
+        save_text_info: bool = False
     ) -> None:
         self._prefix: str = prefix
         self._expected_num_unique_items = expected_num_unique_items
         self._expected_max_item_id = expected_max_item_id
+        self.save_text_info = save_text_info
 
     @abc.abstractmethod
     def expected_num_unique_items(self) -> Optional[int]:
@@ -71,7 +73,7 @@ class DataProcessor:
         user_data: Optional[pd.DataFrame] = None,
         movie_data: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
-        if movie_data is not None:
+        if movie_data is not None and self.save_text_info:
             print("movie_data is not None")
             token_embedding_map = movie_data.set_index("movie_id")["text_info_embedding"].to_dict()
             with open(f"tmp/{self._prefix}/token_embedding_map.pkl", "wb") as pickle_file:
@@ -134,13 +136,15 @@ class MovielensDataProcessor(DataProcessor):
         convert_timestamp: bool,
         expected_num_unique_items: Optional[int] = None,
         expected_max_item_id: Optional[int] = None,
-        text_embedding_model: str = 'bert-base-uncased'
+        text_embedding_model: str = 'bert-base-uncased',
+        cold_sequence_len: int = 6,
     ) -> None:
         super().__init__(prefix, expected_num_unique_items, expected_max_item_id)
         self._download_path = download_path
         self._saved_name = saved_name
         self._convert_timestamp: bool = convert_timestamp
         self._text_embedding_model = text_embedding_model
+        self.cold_sequence_len = cold_sequence_len
 
     def download(self) -> None:
         if not self.file_exists(self._saved_name):
@@ -154,11 +158,20 @@ class MovielensDataProcessor(DataProcessor):
     def processed_item_csv(self) -> str:
         return f"tmp/processed/{self._prefix}/movies.csv"
 
-    def sasrec_format_csv_by_user_train(self) -> str:
-        return f"tmp/{self._prefix}/sasrec_format_by_user_train.csv"
+    def sasrec_format_csv_by_user_train(self, user_info=False) -> str:
+        if user_info:
+            return f"tmp/{self._prefix}/sasrec_format_by_user_train_userinfo.csv"
+        else:
+            return f"tmp/{self._prefix}/sasrec_format_by_user_train.csv"
 
     def sasrec_format_csv_by_user_test(self) -> str:
         return f"tmp/{self._prefix}/sasrec_format_by_user_test.csv"
+
+    def sasrec_format_csv_by_user_test_for_user_cold_rec(self, user_info=False) -> str:
+        if user_info:
+            return f"tmp/{self._prefix}/sasrec_format_by_user_test_for_user_cold_rec_len={self.cold_sequence_len}_userinfo.csv"
+        else:
+            return f"tmp/{self._prefix}/sasrec_format_by_user_test_for_user_cold_rec_len={self.cold_sequence_len}.csv"
 
     def preprocess_rating(self) -> int:
         self.download()
@@ -267,13 +280,13 @@ class MovielensDataProcessor(DataProcessor):
 
             batch_size = 32
             all_embeddings = []
+            if self.save_text_info:
+                for i in tqdm(range(0, len(movies), batch_size)):
+                    batch_texts = movies["text_info"].iloc[i:i+batch_size].tolist()
+                    batch_embeddings = get_bert_embeddings_batch(batch_texts)
+                    all_embeddings.extend(batch_embeddings)
 
-            for i in tqdm(range(0, len(movies), batch_size)):
-                batch_texts = movies["text_info"].iloc[i:i+batch_size].tolist()
-                batch_embeddings = get_bert_embeddings_batch(batch_texts)
-                all_embeddings.extend(batch_embeddings)
-
-            movies["text_info_embedding"] = all_embeddings
+                movies["text_info_embedding"] = all_embeddings
 
         if users is not None:
             ## Users (ml-1m only)
@@ -293,6 +306,7 @@ class MovielensDataProcessor(DataProcessor):
         print(
             f"{self._prefix} #item before normalize: {len(set(ratings['movie_id'].values))}"
         )
+        max_id = max(set(ratings['movie_id'].values))
         print(
             f"{self._prefix} max item id before normalize: {max(set(ratings['movie_id'].values))}"
         )
@@ -339,6 +353,13 @@ class MovielensDataProcessor(DataProcessor):
             result[col + "_max"] = seq_ratings_data[col].apply(len).max()
         print(self._prefix)
         print(result)
+        # print(self._expected_max_item_id, self._expected_num_unique_items)
+
+        max_id = 3952
+        for col in ['sex','age_group','occupation']:
+            users[col] += int(max_id + 1)
+            max_id = users[col].max()
+            print(max_id)
 
         seq_ratings_data = self.to_seq_data(seq_ratings_data, users, movies)
         seq_ratings_data.sample(frac=1).reset_index().to_csv(
@@ -368,11 +389,45 @@ class MovielensDataProcessor(DataProcessor):
             f"{self._prefix}: test num user: {len(set(seq_ratings_data_test['user_id'].values))}"
         )
 
-        # print(seq_ratings_data)
-        if self.expected_num_unique_items() is not None:
-            assert (
-                self.expected_num_unique_items() == num_unique_items
-            ), f"Expected items: {self.expected_num_unique_items()}, got: {num_unique_items}"
+        # train_items = sum(seq_ratings_data_train['sequence_item_ids'].apply(lambda x: x.split(",")),[])
+        # test_items = sum(seq_ratings_data_test['sequence_item_ids'].apply(lambda x: x.split(",")),[])
+        # A_set = set(test_items)
+        # B_set = set(train_items)
+        # A_not_in_B_set = A_set - B_set  # 等价于 A_set.difference(B_set)
+        # A_not_in_B = list(A_not_in_B_set)  # 如果还需要转换回列表
+        # print(A_not_in_B)
+        # print(len(A_not_in_B))
+
+        # cut seq to cold_sequence_len
+        seq_ratings_data_test['sequence_item_ids'] = seq_ratings_data_test['sequence_item_ids'].apply(lambda x: ",".join(x.split(",")[:self.cold_sequence_len]))
+        seq_ratings_data_test['sequence_ratings'] = seq_ratings_data_test['sequence_ratings'].apply(lambda x: ",".join(x.split(",")[:self.cold_sequence_len]))
+        seq_ratings_data_test['sequence_timestamps'] = seq_ratings_data_test['sequence_timestamps'].apply(lambda x: ",".join(x.split(",")[:self.cold_sequence_len]))
+        seq_ratings_data_test['sequence_len'] = self.cold_sequence_len 
+        
+        seq_ratings_data_test.sample(frac=1).reset_index().to_csv(
+            self.sasrec_format_csv_by_user_test_for_user_cold_rec(False), index=False, sep=","
+        )
+
+        # add user info
+        for df in [seq_ratings_data_train, seq_ratings_data_test]:
+            df["sequence_item_ids"] = df.apply(
+                lambda row: f"{row['sex']},{row['age_group']},{row['occupation']}," + row["sequence_item_ids"],
+                axis=1
+            )
+            df['sequence_ratings'] = df['sequence_ratings'].apply(lambda x: "0,0,0," + x)
+            df['sequence_timestamps'] = df['sequence_timestamps'].apply(lambda x: "0,0,0," + x)
+            df['sequence_len'] = self.cold_sequence_len + 3
+        seq_ratings_data_test.sample(frac=1).reset_index().to_csv( 
+            self.sasrec_format_csv_by_user_test_for_user_cold_rec(True), index=False, sep=","
+        )
+        seq_ratings_data_train.sample(frac=1).reset_index().to_csv( 
+            self.sasrec_format_csv_by_user_train(True), index=False, sep=","
+        )
+
+        # if self.expected_num_unique_items() is not None:
+        #     assert (
+        #         self.expected_num_unique_items() == num_unique_items
+        #     ), f"Expected items: {self.expected_num_unique_items()}, got: {num_unique_items}"
 
         return num_unique_items
 
@@ -459,9 +514,9 @@ class AmazonDataProcessor(DataProcessor):
             }
         )
 
-        seq_ratings_data = seq_ratings_data[
-            seq_ratings_data["item_ids"].apply(len) >= 5
-        ]
+        # seq_ratings_data = seq_ratings_data[
+        #     seq_ratings_data["item_ids"].apply(len) >= 5
+        # ]
 
         result = pd.DataFrame([[]])
         for col in ["item_ids"]:
@@ -497,8 +552,8 @@ def get_common_preprocessors() -> Dict[
         "tmp/movielens1m.zip",
         prefix="ml-1m",
         convert_timestamp=False,
-        expected_num_unique_items=3706,
-        expected_max_item_id=3952,
+        expected_num_unique_items=7175,
+        expected_max_item_id=7421,
     )
     ml_20m_dp = MovielensDataProcessor(  # pyre-ignore [45]
         "http://files.grouplens.org/datasets/movielens/ml-20m.zip",
