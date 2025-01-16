@@ -21,7 +21,7 @@ train_fn.user_embedding_norm = "l2_norm"
 train_fn.num_epochs = 101
 train_fn.item_embedding_dim = 0
 # train_fn.pretrained_model_path = "ckpts/ml-1m-l200/HSTU-b8-h2-dqk25-dv25-lsilud0.2-ad0.0_DotProduct_local-l2-eps1e-06_ssl-t0.05-n128-b32-lr0.001-wu0-wd0-2024-12-16_ep100"
-train_fn.special_ids = [2198, 2703, 2909, 2845, 3530, 3607]
+train_fn.special_ids = [3280, 3292, 1903, 3205, 2226, 3184, 3666, 3295, 1548, 2602, 823, 3866, 2631, 3288]
 
 hstu_encoder.num_blocks = 8
 hstu_encoder.num_heads = 2

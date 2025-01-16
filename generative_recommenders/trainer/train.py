@@ -68,6 +68,28 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 import wandb
 
+import numpy as np
+
+def set_random_seed(seed: int, rank: int = 0):
+    """
+    Set random seed for reproducibility.
+
+    Args:
+        seed (int): The base random seed.
+        rank (int): The rank of the current process (used for distributed training).
+    """
+    # Adjust seed for distributed processes
+    seed += rank
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # If using multi-GPU.
+    
+    # Ensure deterministic behavior (may slow down computation)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 
 def setup(rank: int, world_size: int, master_port: int) -> None:
     os.environ["MASTER_ADDR"] = "localhost"
@@ -137,14 +159,18 @@ def train_fn(
     pretrained_model_path: str = None, 
     special_ids: list = None, # [2226, 3280]
     # [2198, 2703, 2909, 2845, 3530, 3607]
+    cold_rec: bool = False,
     user_info: bool = False,
 ) -> None:
 
-
+    print("special_ids", special_ids)
+            
     # Initialize WandB
     if rank == 0:
         freeze = "freeze" if text_freeze else "not freeze"
-        note = "generative-recommenders-for-user-cold-rec-len=5"
+        # coldrec = "coldrec" if cold_rec else ""
+        # note = f"generative-recommenders-for-user-cold-rec-len=5"
+        note = f"generative-recommenders"
         project_name = note if dataset_name=="ml-1m" else f'{note}-{dataset_name}' 
         if embedding_module_type == "withtext":
             run_name = f"{embedding_module_type}-bs{local_batch_size}*{gradient_accumulation_steps}-emb{item_embedding_dim}-{user_info}-{freeze}" 
@@ -162,7 +188,7 @@ def train_fn(
         })
 
     # to enable more deterministic results.
-    random.seed(random_seed)
+    set_random_seed(random_seed, rank)
     torch.backends.cuda.matmul.allow_tf32 = enable_tf32
     torch.backends.cudnn.allow_tf32 = enable_tf32
     logging.info(f"cuda.matmul.allow_tf32: {enable_tf32}")
@@ -174,6 +200,7 @@ def train_fn(
         max_sequence_length=max_sequence_length,
         chronological=True,
         positional_sampling_ratio=positional_sampling_ratio,
+        cold_rec=cold_rec,
         user_info=user_info,
     )
 
@@ -545,7 +572,7 @@ def train_fn(
             seq_features, target_ids, target_ratings = movielens_seq_features_from_row(
                 row, device=device, max_output_length=gr_output_length + 1
             )
-            for item_id in [2226, 3280]:
+            for item_id in special_ids:
                 if item_id in target_ids:
                     print(f"{item_id} in target_ids")
             eval_dict, eval_dict_for_special_ids = eval_metrics_v2_from_tensors(
@@ -558,9 +585,10 @@ def train_fn(
                 dtype=torch.bfloat16 if main_module_bf16 else None,
                 special_ids=special_ids
             )
-             
+
             eval_dict_all = update_eval_dict_all(eval_dict_all, eval_dict)
-            if eval_dict_for_special_ids:
+            if len(eval_dict_for_special_ids)>0:
+                # print("eval_dict_for_special_ids is not None")
                 eval_dict_all_for_special_ids = update_eval_dict_all(eval_dict_all_for_special_ids, eval_dict_for_special_ids)
 
             if (eval_iter + 1 >= partial_eval_num_iters) and (not is_full_eval(epoch)):
@@ -572,7 +600,7 @@ def train_fn(
         assert eval_dict_all is not None
         for k, v in eval_dict_all.items():
             eval_dict_all[k] = torch.cat(v, dim=-1)
-        if eval_dict_for_special_ids:
+        if len(eval_dict_all_for_special_ids)>0:
             assert eval_dict_all_for_special_ids is not None
             for k, v in eval_dict_all_for_special_ids.items():
                 eval_dict_all_for_special_ids[k] = torch.cat(v, dim=-1)
@@ -622,7 +650,7 @@ def train_fn(
                 "epoch": epoch,
                 "batch_id": batch_id
             })
-            if eval_dict_for_special_ids:
+            if len(eval_dict_all_for_special_ids)>0:
                 wandb.log({
                     "cold_start/ndcg@10": _avg(eval_dict_all_for_special_ids["ndcg@10"], world_size=world_size),
                     "cold_start/ndcg@50": _avg(eval_dict_all_for_special_ids["ndcg@50"], world_size=world_size),

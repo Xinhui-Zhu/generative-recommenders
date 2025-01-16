@@ -18,6 +18,7 @@ train_fn.dropout_rate = 0.2
 train_fn.user_embedding_norm = "l2_norm"
 train_fn.num_epochs = 101
 train_fn.item_embedding_dim = 50
+train_fn.special_ids = [3280, 3292, 1903, 3205, 2226, 3184, 3666, 3295, 1548, 2602, 823, 3866, 2631, 3288]
 
 hstu_encoder.num_blocks = 8
 hstu_encoder.num_heads = 2

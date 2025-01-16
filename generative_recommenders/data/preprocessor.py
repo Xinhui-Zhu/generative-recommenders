@@ -355,11 +355,31 @@ class MovielensDataProcessor(DataProcessor):
         print(result)
         # print(self._expected_max_item_id, self._expected_num_unique_items)
 
-        max_id = 3952
-        for col in ['sex','age_group','occupation']:
-            users[col] += int(max_id + 1)
-            max_id = users[col].max()
-            print(max_id)
+        if self._prefix == "ml-1m":
+            max_id = 3952
+        if users is not None:
+            for col in ['sex','age_group','occupation']:
+                users[col] += int(max_id + 1)
+                max_id = users[col].max()
+                print(max_id)
+
+        # Cold item
+        train_list = [item for sublist in seq_ratings_data['item_ids'] for item in sublist[:-1]]
+        test_list = [sublist[-1] for sublist in seq_ratings_data['item_ids']]
+
+        # 统计 train list 中的每个元素出现的次数
+        train_item_counts = pd.Series(train_list).value_counts()
+
+        # 筛选出满足条件的 items
+        target_items = [item for item in test_list if train_item_counts.get(item, 0) <= 5]
+
+        # 打印结果
+        print(target_items)
+        print(len(target_items))
+        print(len(train_list))
+        print(len(set(train_list)))
+        print(len(test_list))
+        print(len(set(test_list)))
 
         seq_ratings_data = self.to_seq_data(seq_ratings_data, users, movies)
         seq_ratings_data.sample(frac=1).reset_index().to_csv(
@@ -409,20 +429,21 @@ class MovielensDataProcessor(DataProcessor):
         )
 
         # add user info
-        for df in [seq_ratings_data_train, seq_ratings_data_test]:
-            df["sequence_item_ids"] = df.apply(
-                lambda row: f"{row['sex']},{row['age_group']},{row['occupation']}," + row["sequence_item_ids"],
-                axis=1
+        if users is not None:
+            for df in [seq_ratings_data_train, seq_ratings_data_test]:
+                df["sequence_item_ids"] = df.apply(
+                    lambda row: f"{row['sex']},{row['age_group']},{row['occupation']}," + row["sequence_item_ids"],
+                    axis=1
+                )
+                df['sequence_ratings'] = df['sequence_ratings'].apply(lambda x: "0,0,0," + x)
+                df['sequence_timestamps'] = df['sequence_timestamps'].apply(lambda x: "0,0,0," + x)
+                df['sequence_len'] = self.cold_sequence_len + 3
+            seq_ratings_data_test.sample(frac=1).reset_index().to_csv( 
+                self.sasrec_format_csv_by_user_test_for_user_cold_rec(True), index=False, sep=","
             )
-            df['sequence_ratings'] = df['sequence_ratings'].apply(lambda x: "0,0,0," + x)
-            df['sequence_timestamps'] = df['sequence_timestamps'].apply(lambda x: "0,0,0," + x)
-            df['sequence_len'] = self.cold_sequence_len + 3
-        seq_ratings_data_test.sample(frac=1).reset_index().to_csv( 
-            self.sasrec_format_csv_by_user_test_for_user_cold_rec(True), index=False, sep=","
-        )
-        seq_ratings_data_train.sample(frac=1).reset_index().to_csv( 
-            self.sasrec_format_csv_by_user_train(True), index=False, sep=","
-        )
+            seq_ratings_data_train.sample(frac=1).reset_index().to_csv( 
+                self.sasrec_format_csv_by_user_train(True), index=False, sep=","
+            )
 
         # if self.expected_num_unique_items() is not None:
         #     assert (
@@ -523,6 +544,16 @@ class AmazonDataProcessor(DataProcessor):
             result[col + "_mean"] = seq_ratings_data[col].apply(len).mean()
             result[col + "_min"] = seq_ratings_data[col].apply(len).min()
             result[col + "_max"] = seq_ratings_data[col].apply(len).max()
+            value_counts = seq_ratings_data[col].value_counts(normalize=True)
+
+            # 绘制频率分布图
+            plt.figure(figsize=(10, 6))
+            value_counts.plot(kind='bar')
+            plt.title(f"Frequency Distribution of {col}")
+            plt.xlabel("Values")
+            plt.ylabel("Frequency")
+            plt.xticks(rotation=45)
+            plt.savefig(f"tmp/{self._prefix}/seq_len_dist.png")
         print(self._prefix)
         print(result)
 
