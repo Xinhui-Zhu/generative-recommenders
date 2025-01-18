@@ -28,6 +28,7 @@ import pandas as pd
 from transformers import BertTokenizer, BertModel
 import torch
 import pickle
+import matplotlib.pyplot as plt
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -351,7 +352,18 @@ class MovielensDataProcessor(DataProcessor):
             result[col + "_mean"] = seq_ratings_data[col].apply(len).mean()
             result[col + "_min"] = seq_ratings_data[col].apply(len).min()
             result[col + "_max"] = seq_ratings_data[col].apply(len).max()
-        print(self._prefix)
+            value_counts = seq_ratings_data[col].apply(len).value_counts(normalize=True)
+
+            # 绘制频率分布图
+            plt.figure(figsize=(10, 6))
+            value_counts.plot(kind='bar')
+            plt.title(f"Frequency Distribution of {col}")
+            plt.xlabel("Values")
+            plt.ylabel("Frequency")
+            plt.xticks(rotation=45)
+            plt.savefig(f"tmp/{self._prefix}/seq_len_dist.png")
+        percentile_20 = np.percentile(seq_ratings_data["item_ids"].apply(len), 20)
+        print(self._prefix, "20% 分位数:", percentile_20)
         print(result)
         # print(self._expected_max_item_id, self._expected_num_unique_items)
 
@@ -544,7 +556,7 @@ class AmazonDataProcessor(DataProcessor):
             result[col + "_mean"] = seq_ratings_data[col].apply(len).mean()
             result[col + "_min"] = seq_ratings_data[col].apply(len).min()
             result[col + "_max"] = seq_ratings_data[col].apply(len).max()
-            value_counts = seq_ratings_data[col].value_counts(normalize=True)
+            value_counts = seq_ratings_data[col].apply(len).value_counts(normalize=True)
 
             # 绘制频率分布图
             plt.figure(figsize=(10, 6))
@@ -554,6 +566,8 @@ class AmazonDataProcessor(DataProcessor):
             plt.ylabel("Frequency")
             plt.xticks(rotation=45)
             plt.savefig(f"tmp/{self._prefix}/seq_len_dist.png")
+        percentile_20 = np.percentile(seq_ratings_data["item_ids"].apply(len), 20)
+        print("20% 分位数:", percentile_20)
         print(self._prefix)
         print(result)
 
